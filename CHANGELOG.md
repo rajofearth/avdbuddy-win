@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-03-01
+
 - Added in-app update checks powered by Sparkle, using GitHub Releases for macOS update delivery.
 - Added `Check for Updates` actions in the app menu and the info window.
 
