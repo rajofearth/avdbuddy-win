@@ -40,6 +40,31 @@ It looks for the SDK in:
 It reads AVDs from:
 - `~/.android/avd`
 
+## Installation
+
+You can install AvdBuddy in either of these ways:
+
+### Download from GitHub Releases
+
+Download the latest macOS DMG from [GitHub Releases](https://github.com/alexstyl/avdbuddy/releases), then open `AvdBuddy.app` from `/Applications`.
+
+### Install with Homebrew
+
+Install directly from the shared tap:
+
+```bash
+brew install --cask alexstyl/tap/avdbuddy
+```
+
+Or tap first, then install:
+
+```bash
+brew tap alexstyl/tap
+brew install --cask avdbuddy
+```
+
+Homebrew installs `AvdBuddy.app` into `/Applications`.
+
 ## Development
 
 Run the test suite:
@@ -54,6 +79,16 @@ Run the project with the provided macOS script. It builds the `AvdBuddy` scheme 
 ./scripts/runMac
 ```
 
+## Homebrew Packaging
+
+AvdBuddy can be distributed as a Homebrew cask from a shared tap repository. Homebrew installs `AvdBuddy.app` into `/Applications`. The app still requires Android SDK tools on the machine in order to manage emulators.
+
+To publish a Homebrew release:
+- build and notarize the macOS DMG with `./scripts/releaseMac`
+- upload the versioned artifact, for example `AvdBuddy-0.3.0.dmg`, to GitHub Releases
+- update the Homebrew cask in your shared tap repo, for example `alexstyl/homebrew-tap`, with the new `version` and `sha256`
+
+The cask source for the tap is included in [`packaging/homebrew/avdbuddy.rb`](./packaging/homebrew/avdbuddy.rb). A short setup guide lives in [`packaging/homebrew/README.md`](./packaging/homebrew/README.md).
 
 ## Credits
 
