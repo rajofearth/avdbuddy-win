@@ -1,6 +1,23 @@
 import AppKit
 import SwiftUI
 
+struct KeyboardShortcutMonitorView: NSViewRepresentable {
+    let onCommandA: () -> Void
+    let onBackgroundClick: () -> Void
+
+    func makeNSView(context: Context) -> KeyboardShortcutMonitorNSView {
+        let view = KeyboardShortcutMonitorNSView()
+        view.onCommandA = onCommandA
+        view.onBackgroundClick = onBackgroundClick
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyboardShortcutMonitorNSView, context: Context) {
+        nsView.onCommandA = onCommandA
+        nsView.onBackgroundClick = onBackgroundClick
+    }
+}
+
 struct CardInteractionView: NSViewRepresentable {
     let onSingleClick: (NSEvent.ModifierFlags) -> Void
     let onDoubleClick: () -> Void
@@ -43,6 +60,68 @@ final class BackgroundInteractionNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onClick?()
+    }
+}
+
+final class KeyboardShortcutMonitorNSView: NSView {
+    var onCommandA: (() -> Void)?
+    var onBackgroundClick: (() -> Void)?
+    private var localMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installMonitorIfNeeded()
+    }
+
+    deinit {
+        removeMonitor()
+    }
+
+    private func installMonitorIfNeeded() {
+        guard localMonitor == nil else { return }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] event in
+            guard let self, let window = self.window, event.window == window else { return event }
+
+            if event.type == .keyDown {
+                guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) else { return event }
+                guard event.charactersIgnoringModifiers?.lowercased() == "a" else { return event }
+
+                if let textView = window.firstResponder as? NSTextView, textView.isEditable {
+                    return event
+                }
+
+                self.onCommandA?()
+                return nil
+            }
+
+            if event.type == .leftMouseDown,
+               let hitView = window.contentView?.hitTest(event.locationInWindow),
+               !hitView.hasAncestor(ofType: CardInteractionNSView.self) {
+                self.onBackgroundClick?()
+            }
+
+            return event
+        }
+    }
+
+    private func removeMonitor() {
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+    }
+}
+
+private extension NSView {
+    func hasAncestor<T: NSView>(ofType type: T.Type) -> Bool {
+        var current: NSView? = self
+        while let view = current {
+            if view is T {
+                return true
+            }
+            current = view.superview
+        }
+        return false
     }
 }
 

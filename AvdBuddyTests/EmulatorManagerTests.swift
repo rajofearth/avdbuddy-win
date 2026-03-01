@@ -353,6 +353,7 @@ struct EmulatorManagerTests {
         let renamedINIContents = try String(contentsOf: renamedINI)
         #expect(renamedINIContents.contains("path.rel=avd/Pixel_API_24_Renamed.avd"))
         #expect(renamedINIContents.contains("target=android-24"))
+        #expect(manager.lastRenamedEmulatorName == "Pixel_API_24_Renamed")
     }
 }
 

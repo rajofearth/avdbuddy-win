@@ -1,4 +1,71 @@
+import AppKit
 import SwiftUI
+
+struct InfoSheet: View {
+    var body: some View {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 116, height: 116)
+                    .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+                    .padding(.bottom, 6)
+
+                Text(bundleName)
+                    .font(.system(size: 28, weight: .bold))
+
+                Text(versionText)
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 20)
+
+                VStack(spacing: 18) {
+                    Link(destination: URL(string: "https://github.com/alexstyl/avdbuddy")!) {
+                        InfoLinkLabel(systemName: "chevron.left.forwardslash.chevron.right", title: "Star on GitHub")
+                    }
+
+                    Link(destination: URL(string: "https://x.com/alexstyl")!) {
+                        InfoLinkLabel(systemName: "bird", title: "Follow on X")
+                    }
+                }
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(.purple)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 560, height: 460)
+    }
+
+    private var bundleName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "AvdBuddy"
+    }
+
+    private var versionText: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "Version \(shortVersion) (\(build))"
+    }
+}
+
+struct InfoLinkLabel: View {
+    let systemName: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .regular))
+                .frame(width: 20, alignment: .center)
+
+            Text(title)
+                .font(.system(size: 18, weight: .regular))
+        }
+    }
+}
 
 struct RenameAVDSheet: View {
     @ObservedObject var manager: EmulatorManager
@@ -27,8 +94,7 @@ struct RenameAVDSheet: View {
                 Button("Rename") {
                     Task {
                         await manager.rename(emulator, to: renameDraft)
-                        if manager.validationMessageForRename(from: emulator.name, to: renameDraft) == nil,
-                           manager.statusMessage.hasPrefix("Renamed ") {
+                        if manager.lastRenamedEmulatorName == renameDraft.trimmingCharacters(in: .whitespacesAndNewlines) {
                             dismiss()
                         }
                     }

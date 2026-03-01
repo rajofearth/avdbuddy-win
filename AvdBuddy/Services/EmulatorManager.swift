@@ -10,6 +10,7 @@ final class EmulatorManager: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
     @Published private(set) var lastCreatedEmulatorName: String?
+    @Published private(set) var lastRenamedEmulatorName: String?
     @Published private(set) var toolchainStatus: AndroidToolchainStatus
 
     private let runner: CommandRunning
@@ -334,6 +335,7 @@ final class EmulatorManager: ObservableObject {
                 try renameEmulator(from: emulator.name, to: trimmedName)
                 refreshEmulators()
                 refreshRunningStates()
+                lastRenamedEmulatorName = trimmedName
                 statusMessage = "Renamed \(emulator.name) to \(trimmedName)."
             } catch {
                 statusMessage = "Rename failed: \(error.localizedDescription)"
