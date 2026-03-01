@@ -10,23 +10,32 @@ final class EmulatorManager: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
     @Published private(set) var lastCreatedEmulatorName: String?
+    @Published private(set) var toolchainStatus: AndroidToolchainStatus
 
     private let runner: CommandRunning
     private let fileManager: FileManager
-    private let sdkPath: String
     private let avdRootOverride: URL?
+    private let userDefaults: UserDefaults
     private var createCancellationFlag: CancellationFlag?
+    private var sdkPathOverride: String?
 
     init(
         runner: CommandRunning = ProcessCommandRunner(),
         fileManager: FileManager = FileManager(),
-        sdkPath: String = AndroidSDKLocator.sdkPath(),
-        avdRootOverride: URL? = nil
+        sdkPath: String = AndroidSDKLocator.preferredSDKPath(),
+        avdRootOverride: URL? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.runner = runner
         self.fileManager = fileManager
-        self.sdkPath = sdkPath
         self.avdRootOverride = avdRootOverride
+        self.userDefaults = userDefaults
+        self.sdkPathOverride = sdkPath
+        self.toolchainStatus = AndroidSDKLocator.toolchainStatus(
+            preferredSDKPath: sdkPath,
+            fileManager: fileManager,
+            userDefaults: userDefaults
+        )
     }
 
     func refreshEmulators() {
@@ -81,7 +90,31 @@ final class EmulatorManager: ObservableObject {
     }
 
     var sdkManagerDebugCommand: String {
-        sdkManagerBinary
+        resolvedToolchain().sdkManager
+    }
+
+    var isToolchainConfigured: Bool {
+        toolchainStatus.isConfigured
+    }
+
+    var autodetectedSDKPath: String? {
+        AndroidSDKLocator.autodetectedSDKPath(fileManager: fileManager)
+    }
+
+    func updateSDKPath(_ sdkPath: String?) {
+        let trimmed = sdkPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        sdkPathOverride = trimmed?.isEmpty == false ? trimmed : nil
+        AndroidSDKSettings.setStoredSDKPath(sdkPathOverride, userDefaults: userDefaults)
+        toolchainStatus = AndroidSDKLocator.toolchainStatus(
+            preferredSDKPath: sdkPathOverride,
+            fileManager: fileManager,
+            userDefaults: userDefaults
+        )
+        refreshRunningStates()
+    }
+
+    func clearStatusMessage() {
+        statusMessage = ""
     }
 
     func loadSystemImages() async throws -> [AndroidSystemImage] {
@@ -90,7 +123,7 @@ final class EmulatorManager: ObservableObject {
 
     func loadSystemImagesWithDebugOutput() async throws -> (images: [AndroidSystemImage], output: String) {
         let runner = self.runner
-        let executable = sdkManagerBinary
+        let executable = try requireToolchain(for: "Loading Android versions").sdkManager
         let result = try await Task.detached(priority: .userInitiated) {
             try runner.run(Command(
                 executable: executable,
@@ -128,13 +161,13 @@ final class EmulatorManager: ObservableObject {
 
         do {
             let runner = self.runner
-            let sdkPath = self.sdkPath
+            let toolchain = try requireToolchain(for: "Creating an AVD")
             let avdRootURL = self.avdRootURL
             let output = try await Task.detached(priority: .userInitiated) {
                 try Self.createEmulator(
                     configuration: configuration,
                     runner: runner,
-                    sdkPath: sdkPath,
+                    toolchain: toolchain,
                     avdRootURL: avdRootURL
                 )
             }.value
@@ -168,7 +201,7 @@ final class EmulatorManager: ObservableObject {
         }
 
         do {
-            let sdkPath = self.sdkPath
+            let toolchain = try requireToolchain(for: "Creating an AVD")
             let avdRootURL = self.avdRootURL
             let streamingRunner = self.runner
 
@@ -177,7 +210,7 @@ final class EmulatorManager: ObservableObject {
                     try Self.createEmulatorStreaming(
                         configuration: configuration,
                         runner: streamingRunner,
-                        sdkPath: sdkPath,
+                        toolchain: toolchain,
                         avdRootURL: avdRootURL,
                         cancellationFlag: cancellationFlag,
                         onOutput: onOutput
@@ -258,10 +291,10 @@ final class EmulatorManager: ObservableObject {
         do {
             let avdName = emulator.name
             let runner = self.runner
-            let sdkPath = self.sdkPath
+            let toolchain = try requireToolchain(for: "Deleting an AVD")
 
             try await Task.detached(priority: .userInitiated) {
-                try Self.deleteEmulator(named: avdName, runner: runner, sdkPath: sdkPath)
+                try Self.deleteEmulator(named: avdName, runner: runner, toolchain: toolchain)
             }.value
 
             refreshEmulators()
@@ -405,11 +438,11 @@ final class EmulatorManager: ObservableObject {
     private nonisolated static func createEmulator(
         configuration: CreateAVDResolvedConfiguration,
         runner: any CommandRunning,
-        sdkPath: String,
+        toolchain: AndroidToolchain,
         avdRootURL: URL
     ) throws -> String {
-        let sdkManager = "\(sdkPath)/cmdline-tools/latest/bin/sdkmanager"
-        let avdManager = "\(sdkPath)/cmdline-tools/latest/bin/avdmanager"
+        let sdkManager = toolchain.sdkManager
+        let avdManager = toolchain.avdManager
 
         let installResult = try runner.run(Command(
             executable: sdkManager,
@@ -452,13 +485,13 @@ final class EmulatorManager: ObservableObject {
     private nonisolated static func createEmulatorStreaming(
         configuration: CreateAVDResolvedConfiguration,
         runner: any StreamingCommandRunning,
-        sdkPath: String,
+        toolchain: AndroidToolchain,
         avdRootURL: URL,
         cancellationFlag: CancellationFlag,
         onOutput: @escaping @Sendable (String) -> Void
     ) throws -> String {
-        let sdkManager = "\(sdkPath)/cmdline-tools/latest/bin/sdkmanager"
-        let avdManager = "\(sdkPath)/cmdline-tools/latest/bin/avdmanager"
+        let sdkManager = toolchain.sdkManager
+        let avdManager = toolchain.avdManager
 
         var combinedOutput = "$ \(sdkManager) --install \(configuration.packagePath)\n"
         onOutput(combinedOutput)
@@ -638,7 +671,7 @@ final class EmulatorManager: ObservableObject {
     }
 
     private func launchEmulator(named avdName: String) throws {
-        let emulatorBinary = "\(sdkPath)/emulator/emulator"
+        let emulatorBinary = try requireToolchain(for: "Launching an emulator").emulator
         _ = try runner.run(Command(
             executable: emulatorBinary,
             arguments: ["-avd", avdName],
@@ -655,8 +688,8 @@ final class EmulatorManager: ObservableObject {
         return true
     }
 
-    private nonisolated static func deleteEmulator(named avdName: String, runner: any CommandRunning, sdkPath: String) throws {
-        let avdManager = "\(sdkPath)/cmdline-tools/latest/bin/avdmanager"
+    private nonisolated static func deleteEmulator(named avdName: String, runner: any CommandRunning, toolchain: AndroidToolchain) throws {
+        let avdManager = toolchain.avdManager
         _ = try runner.run(Command(
             executable: avdManager,
             arguments: ["delete", "avd", "-n", avdName]
@@ -700,7 +733,7 @@ final class EmulatorManager: ObservableObject {
     }
 
     private func runningEmulatorSerialsByName() throws -> [String: String] {
-        let adbBinary = "\(sdkPath)/platform-tools/adb"
+        let adbBinary = try requireToolchain(for: "Checking running emulators").adb
         let devicesOutput = try runner.run(Command(
             executable: adbBinary,
             arguments: ["devices"]
@@ -756,7 +789,7 @@ final class EmulatorManager: ObservableObject {
     }
 
     private func killEmulator(serial: String) throws {
-        let adbBinary = "\(sdkPath)/platform-tools/adb"
+        let adbBinary = try requireToolchain(for: "Stopping an emulator").adb
         _ = try runner.run(Command(
             executable: adbBinary,
             arguments: ["-s", serial, "emu", "kill"]
@@ -772,8 +805,15 @@ final class EmulatorManager: ObservableObject {
             .appendingPathComponent("avd")
     }
 
-    private var sdkManagerBinary: String {
-        "\(sdkPath)/cmdline-tools/latest/bin/sdkmanager"
+    private func resolvedToolchain() -> AndroidToolchain {
+        AndroidSDKLocator.resolveToolchain(for: toolchainStatus.sdkPath, fileManager: fileManager)
+    }
+
+    private func requireToolchain(for action: String) throws -> AndroidToolchain {
+        guard toolchainStatus.isConfigured else {
+            throw AndroidToolchainError.notConfigured(toolchainStatus.actionMessage(for: action))
+        }
+        return resolvedToolchain()
     }
 
     private nonisolated static func apply(

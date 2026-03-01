@@ -14,4 +14,17 @@ struct CreateAVDModelsTests {
             #expect(name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil)
         }
     }
+
+    @Test
+    func exposesExpectedWizardFormFactors() {
+        #expect(CreateAVDDeviceType.allCases.map(\.rawValue) == [
+            "Phone",
+            "Tablet",
+            "Wear OS",
+            "Desktop",
+            "TV",
+            "Automotive",
+            "XR"
+        ])
+    }
 }

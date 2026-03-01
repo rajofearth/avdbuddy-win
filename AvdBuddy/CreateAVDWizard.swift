@@ -479,9 +479,11 @@ struct CreateAVDWizardView: View {
         switch deviceType {
         case .phone: "Standard handheld Android emulator."
         case .tablet: "Large-screen Android tablet experience."
-        case .foldable: "Foldable layouts and posture testing."
-        case .tv: "Android TV and living-room surfaces."
         case .wearOS: "Watch-sized Wear OS emulator."
+        case .desktop: "Desktop-mode Android with freeform windows."
+        case .tv: "Android TV and living-room surfaces."
+        case .automotive: "In-car Android Automotive experiences."
+        case .xr: "Immersive Android XR devices and glasses."
         }
     }
 }

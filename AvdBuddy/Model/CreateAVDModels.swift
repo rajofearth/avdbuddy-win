@@ -3,9 +3,11 @@ import Foundation
 enum CreateAVDDeviceType: String, CaseIterable, Identifiable {
     case phone = "Phone"
     case tablet = "Tablet"
-    case foldable = "Foldable"
-    case tv = "TV"
     case wearOS = "Wear OS"
+    case desktop = "Desktop"
+    case tv = "TV"
+    case automotive = "Automotive"
+    case xr = "XR"
 
     var id: String { rawValue }
 
@@ -13,9 +15,11 @@ enum CreateAVDDeviceType: String, CaseIterable, Identifiable {
         switch self {
         case .phone: "iphone"
         case .tablet: "ipad.landscape"
-        case .foldable: "rectangle.split.2x1"
-        case .tv: "tv"
         case .wearOS: "applewatch"
+        case .desktop: "desktopcomputer"
+        case .tv: "tv"
+        case .automotive: "car"
+        case .xr: "visionpro"
         }
     }
 
@@ -35,15 +39,25 @@ enum CreateAVDDeviceType: String, CaseIterable, Identifiable {
                 .init(id: "pixel_9", name: "Pixel 9"),
                 .init(id: "pixel_9a", name: "Pixel 9a"),
                 .init(id: "pixel_9_pro", name: "Pixel 9 Pro"),
-                .init(id: "pixel_9_pro_xl", name: "Pixel 9 Pro XL")
+                .init(id: "pixel_9_pro_xl", name: "Pixel 9 Pro XL"),
+                .init(id: "pixel_9_pro_fold", name: "Pixel 9 Pro Fold"),
+                .init(id: "pixel_fold", name: "Pixel Fold")
             ]
         case .tablet:
             return [
                 .init(id: "pixel_tablet", name: "Pixel Tablet")
             ]
-        case .foldable:
+        case .wearOS:
             return [
-                .init(id: "pixel_9_pro_fold", name: "Pixel 9 Pro Fold")
+                .init(id: "wearos_large_round", name: "Large Round"),
+                .init(id: "wearos_rect", name: "Rectangular"),
+                .init(id: "wearos_square", name: "Square")
+            ]
+        case .desktop:
+            return [
+                .init(id: "desktop_small", name: "Small Desktop"),
+                .init(id: "desktop_medium", name: "Medium Desktop"),
+                .init(id: "desktop_large", name: "Large Desktop")
             ]
         case .tv:
             return [
@@ -51,11 +65,20 @@ enum CreateAVDDeviceType: String, CaseIterable, Identifiable {
                 .init(id: "tv_4k", name: "TV 4K"),
                 .init(id: "tv_720p", name: "TV 720p")
             ]
-        case .wearOS:
+        case .automotive:
             return [
-                .init(id: "wearos_large_round", name: "Large Round"),
-                .init(id: "wearos_rect", name: "Rectangular"),
-                .init(id: "wearos_square", name: "Square")
+                .init(id: "automotive_1080p_landscape", name: "1080p Landscape"),
+                .init(id: "automotive_1024p_landscape", name: "1024p Landscape"),
+                .init(id: "automotive_1408p_landscape_with_google_apis", name: "1408p Landscape"),
+                .init(id: "automotive_1408p_landscape_with_play", name: "1408p Landscape with Google Play"),
+                .init(id: "automotive_large_portrait", name: "Large Portrait"),
+                .init(id: "automotive_portrait", name: "Portrait"),
+                .init(id: "automotive_ultrawide", name: "Ultrawide")
+            ]
+        case .xr:
+            return [
+                .init(id: "xr_headset_device", name: "XR Headset"),
+                .init(id: "xr_glasses_device", name: "XR Glasses")
             ]
         }
     }
@@ -198,8 +221,14 @@ struct AndroidSystemImage: Identifiable, Equatable {
             return [.tv]
         case .wear:
             return [.wearOS]
+        case .desktop:
+            return [.desktop]
+        case .automotive, .automotivePlay:
+            return [.automotive]
+        case .xr:
+            return [.xr]
         default:
-            return [.phone, .tablet, .foldable]
+            return [.phone, .tablet]
         }
     }
 
@@ -221,6 +250,10 @@ struct AndroidSystemImage: Identifiable, Equatable {
             return .googlePlay
         case .wear:
             return GoogleServicesOption.none
+        case .automotive:
+            return .googleAPIs
+        case .automotivePlay, .xr:
+            return .googlePlay
         case .unsupported:
             return nil
         }
@@ -253,6 +286,9 @@ enum SystemImageTag: Equatable {
     case googleTV
     case wear
     case desktop
+    case automotive
+    case automotivePlay
+    case xr
     case unsupported
 
     init(rawTag: String) {
@@ -270,6 +306,12 @@ enum SystemImageTag: Equatable {
             self = .wear
         } else if rawTag == "android-desktop" {
             self = .desktop
+        } else if rawTag == "android-automotive" {
+            self = .automotive
+        } else if rawTag == "android-automotive-playstore" || rawTag == "android-automotive-distant-display-playstore" {
+            self = .automotivePlay
+        } else if rawTag == "google-xr" {
+            self = .xr
         } else {
             self = .unsupported
         }

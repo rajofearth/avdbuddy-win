@@ -5,6 +5,10 @@ import Testing
 struct EmulatorManagerTests {
     @Test @MainActor
     func loadsSystemImagesFromSDKManagerList() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         runner.handler = { command in
             if command.arguments == ["--list"] {
@@ -13,7 +17,7 @@ struct EmulatorManagerTests {
             return CommandResult(exitCode: 0, stdout: "", stderr: "")
         }
 
-        let manager = EmulatorManager(runner: runner, fileManager: FileManager(), sdkPath: "/sdk")
+        let manager = EmulatorManager(runner: runner, fileManager: FileManager(), sdkPath: sdkRoot.path)
         let images = try await manager.loadSystemImages()
 
         #expect(images.contains(where: { $0.packagePath == "system-images;android-36;google_apis_playstore;arm64-v8a" && !$0.isInstalled }))
@@ -24,10 +28,13 @@ struct EmulatorManagerTests {
     func createsResolvedAVDUsingSelectedSystemImageAndWritesConfig() async throws {
         let tempDirectory = try temporaryAVDRoot()
         defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
 
         let runner = MockRunner()
         runner.handler = { command in
-            if command.executable == "/sdk/cmdline-tools/latest/bin/avdmanager",
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
                command.arguments.starts(with: ["create", "avd"]) {
                 let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
                 let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
@@ -51,7 +58,7 @@ struct EmulatorManagerTests {
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk",
+            sdkPath: sdkRoot.path,
             avdRootOverride: tempDirectory
         )
 
@@ -68,7 +75,7 @@ struct EmulatorManagerTests {
 
         #expect(didCreate)
         #expect(runner.commands.count == 2)
-        #expect(runner.commands[0].executable == "/sdk/cmdline-tools/latest/bin/sdkmanager")
+        #expect(runner.commands[0].executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/sdkmanager")
         #expect(runner.commands[0].arguments == ["--install", "system-images;android-36;google_apis_playstore;arm64-v8a"])
         #expect(runner.commands[1].arguments == [
             "create", "avd",
@@ -109,39 +116,51 @@ struct EmulatorManagerTests {
 
     @Test @MainActor
     func launchesEmulatorUsingPlayCommand() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk"
+            sdkPath: sdkRoot.path
         )
 
         await manager.launch(EmulatorInstance(id: "a", name: "Pixel_API_24", apiLevel: 24))
 
         #expect(runner.commands.count == 1)
-        #expect(runner.commands[0].executable == "/sdk/emulator/emulator")
+        #expect(runner.commands[0].executable == "\(sdkRoot.path)/emulator/emulator")
         #expect(runner.commands[0].arguments == ["-avd", "Pixel_API_24"])
         #expect(runner.commands[0].waitForExit == false)
     }
 
     @Test @MainActor
     func deletesEmulatorUsingDeleteCommand() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk"
+            sdkPath: sdkRoot.path
         )
 
         await manager.delete(EmulatorInstance(id: "a", name: "Pixel_API_24", apiLevel: 24))
 
         #expect(runner.commands.count == 1)
-        #expect(runner.commands[0].executable == "/sdk/cmdline-tools/latest/bin/avdmanager")
+        #expect(runner.commands[0].executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager")
         #expect(runner.commands[0].arguments == ["delete", "avd", "-n", "Pixel_API_24"])
     }
 
     @Test @MainActor
     func stopsRunningEmulatorUsingAdbKill() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         runner.handler = { command in
             if command.arguments == ["devices"] {
@@ -163,13 +182,13 @@ struct EmulatorManagerTests {
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk"
+            sdkPath: sdkRoot.path
         )
 
         await manager.stop(EmulatorInstance(id: "a", name: "Pixel_API_24", apiLevel: 24))
 
         #expect(runner.commands.count == 5)
-        #expect(runner.commands[0].executable == "/sdk/platform-tools/adb")
+        #expect(runner.commands[0].executable == "\(sdkRoot.path)/platform-tools/adb")
         #expect(runner.commands[0].arguments == ["devices"])
         #expect(runner.commands[1].arguments == ["-s", "emulator-5554", "shell", "getprop", "ro.boot.qemu.avd_name"])
         #expect(runner.commands[2].arguments == ["-s", "emulator-5554", "emu", "kill"])
@@ -179,6 +198,10 @@ struct EmulatorManagerTests {
 
     @Test @MainActor
     func refreshRunningStatesTracksRunningAvdNames() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         runner.handler = { command in
             if command.arguments == ["devices"] {
@@ -200,7 +223,7 @@ struct EmulatorManagerTests {
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk"
+            sdkPath: sdkRoot.path
         )
 
         manager.refreshRunningStates()
@@ -210,6 +233,10 @@ struct EmulatorManagerTests {
 
     @Test @MainActor
     func killAllStopsEveryRunningEmulator() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
         let runner = MockRunner()
         runner.handler = { command in
             if command.arguments == ["devices"] {
@@ -231,7 +258,7 @@ struct EmulatorManagerTests {
         let manager = EmulatorManager(
             runner: runner,
             fileManager: FileManager(),
-            sdkPath: "/sdk"
+            sdkPath: sdkRoot.path
         )
 
         await manager.killAllRunningEmulators()
@@ -345,6 +372,29 @@ private func temporaryAVDRoot() throws -> URL {
     let avdRoot = baseDirectory.appendingPathComponent("avd")
     try FileManager().createDirectory(at: avdRoot, withIntermediateDirectories: true)
     return avdRoot
+}
+
+private func temporarySDKRoot() throws -> URL {
+    let sdkRoot = FileManager().temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager().createDirectory(at: sdkRoot, withIntermediateDirectories: true)
+    return sdkRoot
+}
+
+private func createSDKToolchainFixture(at sdkRoot: URL) throws {
+    let fileManager = FileManager()
+    let relativePaths = [
+        "cmdline-tools/latest/bin/sdkmanager",
+        "cmdline-tools/latest/bin/avdmanager",
+        "emulator/emulator",
+        "platform-tools/adb"
+    ]
+
+    for relativePath in relativePaths {
+        let fileURL = sdkRoot.appendingPathComponent(relativePath)
+        try fileManager.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fileURL.path)
+    }
 }
 
 private func createAVDFixture(named name: String, at avdRoot: URL, target: String, colorSeed: String? = nil) throws {

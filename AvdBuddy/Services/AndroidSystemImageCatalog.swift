@@ -127,11 +127,17 @@ struct AndroidSystemImageCatalog {
         let options = Set(release.images.compactMap(\.googleServicesOption))
 
         switch deviceType {
-        case .tv:
-            return [.none, .googlePlay].filter { options.contains($0) }
         case .wearOS:
             return [.none].filter { options.contains($0) }
-        case .phone, .tablet, .foldable:
+        case .desktop:
+            return [.none].filter { options.contains($0) }
+        case .tv:
+            return [.none, .googlePlay].filter { options.contains($0) }
+        case .automotive:
+            return [.googleAPIs, .googlePlay].filter { options.contains($0) }
+        case .xr:
+            return [.googlePlay].filter { options.contains($0) }
+        case .phone, .tablet:
             return [.none, .googleAPIs, .googlePlay].filter { options.contains($0) }
         }
     }
@@ -303,14 +309,30 @@ struct AndroidSystemImageCatalog {
 
     private static func tagPriority(_ tag: SystemImageTag) -> Int {
         switch tag {
-        case .googlePlay: 0
-        case .googleAPIs: 1
-        case .default: 2
-        case .googleTV: 3
-        case .androidTV: 4
-        case .wear: 5
-        case .desktop: 6
-        case .unsupported: 7
+        case .googlePlay:
+            return 0
+        case .googleAPIs:
+            return 1
+        case .automotivePlay:
+            return 2
+        case .xr:
+            return 3
+        case .default:
+            return 4
+        case .googleTV:
+            return 5
+        case .androidTV:
+            return 6
+        case .wear:
+            return 7
+        case .desktop:
+            return 8
+        case .automotive:
+            return 9
+        case .unsupported:
+            return 10
+        @unknown default:
+            return 11
         }
     }
 

@@ -41,9 +41,49 @@ enum AVDConfigParser {
             return .tv
         }
 
+        if let tagID = value(forKey: "tag.id", in: config)?.lowercased(),
+           tagID.contains("wear") {
+            return .wearOS
+        }
+
+        if let tagID = value(forKey: "tag.id", in: config)?.lowercased(),
+           tagID.contains("desktop") {
+            return .desktop
+        }
+
+        if let tagID = value(forKey: "tag.id", in: config)?.lowercased(),
+           tagID.contains("automotive") {
+            return .automotive
+        }
+
+        if let tagID = value(forKey: "tag.id", in: config)?.lowercased(),
+           tagID.contains("xr") || tagID.contains("glasses") {
+            return .xr
+        }
+
         if let deviceName = value(forKey: "hw.device.name", in: config)?.lowercased(),
            deviceName.hasPrefix("tv_") {
             return .tv
+        }
+
+        if let deviceName = value(forKey: "hw.device.name", in: config)?.lowercased(),
+           deviceName.hasPrefix("wearos_") {
+            return .wearOS
+        }
+
+        if let deviceName = value(forKey: "hw.device.name", in: config)?.lowercased(),
+           deviceName.hasPrefix("desktop_") {
+            return .desktop
+        }
+
+        if let deviceName = value(forKey: "hw.device.name", in: config)?.lowercased(),
+           deviceName.hasPrefix("automotive_") {
+            return .automotive
+        }
+
+        if let deviceName = value(forKey: "hw.device.name", in: config)?.lowercased(),
+           deviceName.hasPrefix("xr_") || deviceName.hasPrefix("ai_glasses_") {
+            return .xr
         }
 
         guard let dimensions = screenDimensions(from: config) else { return .unknown }

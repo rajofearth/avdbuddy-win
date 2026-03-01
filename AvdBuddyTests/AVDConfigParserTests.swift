@@ -72,6 +72,33 @@ struct AVDConfigParserTests {
     }
 
     @Test
+    func classifiesWearDesktopAutomotiveAndXrFromTags() {
+        let wearConfig = """
+        tag.id=android-wear
+        hw.device.name=wearos_large_round
+        """
+        #expect(AVDConfigParser.deviceType(from: wearConfig) == .wearOS)
+
+        let desktopConfig = """
+        tag.id=android-desktop
+        hw.device.name=desktop_medium
+        """
+        #expect(AVDConfigParser.deviceType(from: desktopConfig) == .desktop)
+
+        let automotiveConfig = """
+        tag.id=android-automotive-playstore
+        hw.device.name=automotive_1024p_landscape
+        """
+        #expect(AVDConfigParser.deviceType(from: automotiveConfig) == .automotive)
+
+        let xrConfig = """
+        tag.id=android-xr
+        hw.device.name=xr_headset_device
+        """
+        #expect(AVDConfigParser.deviceType(from: xrConfig) == .xr)
+    }
+
+    @Test
     func extractsPersistedColorSeed() {
         let config = """
         avdbuddy.color.seed=1f2e3d4c

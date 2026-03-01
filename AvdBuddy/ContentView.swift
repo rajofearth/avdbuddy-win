@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var emulatorPendingRename: EmulatorInstance?
     @State private var renameDraft = ""
     @State private var isPresentingCreateWizard = false
+    @State private var isPresentingSDKSetup = false
 
     private let horizontalPadding: CGFloat = 22
     private let gridSpacing: CGFloat = 24
@@ -27,11 +28,24 @@ struct ContentView: View {
                 .padding(.trailing, 28)
                 .padding(.bottom, 26)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+
+            configButton
+                .padding(.trailing, 24)
+                .padding(.top, 22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+            topBanners
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 980, minHeight: 680)
         .background(WindowConfigurationView())
         .sheet(isPresented: $isPresentingCreateWizard) {
             CreateAVDSheet(manager: manager)
+        }
+        .sheet(isPresented: $isPresentingSDKSetup) {
+            AndroidSDKSetupSheet(manager: manager)
         }
         .sheet(
             isPresented: Binding(
@@ -55,6 +69,9 @@ struct ContentView: View {
         .task {
             manager.refreshEmulators()
             manager.refreshRunningStates()
+            if !manager.isToolchainConfigured {
+                isPresentingSDKSetup = true
+            }
         }
         .task {
             while !Task.isCancelled {
@@ -65,6 +82,11 @@ struct ContentView: View {
         .onChange(of: manager.lastCreatedEmulatorName) { newValue in
             guard let newValue else { return }
             selectedEmulatorIDs = [newValue]
+        }
+        .onChange(of: manager.isToolchainConfigured) { isConfigured in
+            if isConfigured {
+                isPresentingSDKSetup = false
+            }
         }
         .alert(
             emulatorsPendingDeletion.count > 1 ? "Delete emulators?" : "Delete emulator?",
@@ -102,7 +124,7 @@ struct ContentView: View {
     private var createFAB: some View {
         if #available(macOS 26.0, *) {
             Button {
-                isPresentingCreateWizard = true
+                presentCreateFlow()
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 22, weight: .light))
@@ -111,9 +133,10 @@ struct ContentView: View {
             .labelStyle(.iconOnly)
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
+            .disabled(!manager.isToolchainConfigured)
         } else {
             Button {
-                isPresentingCreateWizard = true
+                presentCreateFlow()
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 22, weight: .light))
@@ -121,6 +144,55 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .clipShape(Circle())
+            .disabled(!manager.isToolchainConfigured)
+        }
+    }
+
+    private var configButton: some View {
+        Button {
+            isPresentingSDKSetup = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.plain)
+        .background(
+            Circle()
+                .fill(Color.white.opacity(0.08))
+        )
+        .overlay(
+            Circle()
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .help("Android SDK Settings")
+    }
+
+    @ViewBuilder
+    private var topBanners: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !manager.isToolchainConfigured {
+                StatusBanner(
+                    title: "Android SDK setup required",
+                    message: manager.toolchainStatus.summary,
+                    tint: .orange,
+                    actionTitle: "Configure",
+                    action: {
+                        isPresentingSDKSetup = true
+                    }
+                )
+            }
+
+            if !manager.statusMessage.isEmpty {
+                StatusBanner(
+                    title: "Status",
+                    message: manager.statusMessage,
+                    tint: manager.statusMessage.localizedCaseInsensitiveContains("failed") ? .red : .blue,
+                    dismissAction: {
+                        manager.clearStatusMessage()
+                    }
+                )
+            }
         }
     }
 
@@ -160,6 +232,11 @@ struct ContentView: View {
                                             manager.statusMessage = "\(emulator.name) is already running."
                                             return
                                         }
+                                        guard manager.isToolchainConfigured else {
+                                            manager.statusMessage = manager.toolchainStatus.actionMessage(for: "Launching an emulator")
+                                            isPresentingSDKSetup = true
+                                            return
+                                        }
                                         Task { await manager.launch(emulator) }
                                     },
                                     onRightClick: {
@@ -195,7 +272,7 @@ struct ContentView: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.6))
             Button("Create AVD") {
-                isPresentingCreateWizard = true
+                presentCreateFlow()
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
@@ -209,6 +286,7 @@ struct ContentView: View {
                     .stroke(.white.opacity(0.14), lineWidth: 1)
             )
             .foregroundStyle(.white)
+            .disabled(!manager.isToolchainConfigured)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 60)
@@ -269,7 +347,7 @@ struct ContentView: View {
                     title: "Move to Trash",
                     systemImage: nil,
                     isDestructive: true,
-                    isEnabled: !manager.isBusy && deletionTargets.allSatisfy { !manager.isDeleting($0) },
+                    isEnabled: manager.isToolchainConfigured && !manager.isBusy && deletionTargets.allSatisfy { !manager.isDeleting($0) },
                     handler: {
                         emulatorsPendingDeletion = deletionTargets
                     }
@@ -330,12 +408,21 @@ struct ContentView: View {
                 title: "Move to Trash",
                 systemImage: nil,
                 isDestructive: true,
-                isEnabled: !manager.isBusy && deletionTargets.allSatisfy { !manager.isDeleting($0) },
+                isEnabled: manager.isToolchainConfigured && !manager.isBusy && deletionTargets.allSatisfy { !manager.isDeleting($0) },
                 handler: {
                     emulatorsPendingDeletion = deletionTargets
                 }
             )
         ]
+    }
+
+    private func presentCreateFlow() {
+        guard manager.isToolchainConfigured else {
+            manager.statusMessage = manager.toolchainStatus.actionMessage(for: "Creating an AVD")
+            isPresentingSDKSetup = true
+            return
+        }
+        isPresentingCreateWizard = true
     }
 }
 
