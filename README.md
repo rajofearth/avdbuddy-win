@@ -21,7 +21,11 @@ AvdBuddy reads the Android SDK and local AVD setup on your Mac, then gives you a
 
 ## Requirements
 
-AvdBuddy expects a working Android emulator toolchain on the Mac:
+To build and run AvdBuddy from source, you need:
+- macOS
+- Xcode with command line tools (`xcodebuild`)
+
+To use AvdBuddy with Android emulators, you also need:
 - Android SDK command-line tools
 - `avdmanager`
 - `sdkmanager`
@@ -44,7 +48,7 @@ Run the test suite:
 swift test
 ```
 
-Run the app:
+Run the project with the provided macOS script. It builds the `AvdBuddy` scheme in `Debug` and launches the app:
 
 ```bash
 ./scripts/runMac
