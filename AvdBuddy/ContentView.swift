@@ -148,17 +148,6 @@ struct ContentView: View {
                     }
                 )
             }
-
-            if !manager.statusMessage.isEmpty {
-                StatusBanner(
-                    title: "Status",
-                    message: manager.statusMessage,
-                    tint: manager.statusMessage.localizedCaseInsensitiveContains("failed") ? .red : .blue,
-                    dismissAction: {
-                        manager.clearStatusMessage()
-                    }
-                )
-            }
         }
     }
 
@@ -173,18 +162,13 @@ struct ContentView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, alignment: .leading, spacing: gridSpacing) {
                         ForEach(manager.emulators) { emulator in
-                            Button {
-                                selectedEmulatorID = emulator.id
-                            } label: {
-                                EmulatorCard(
-                                    emulator: emulator,
-                                    isSelected: selectedEmulatorID == emulator.id,
-                                    isHovered: hoveredEmulatorID == emulator.id,
-                                    isRunning: manager.isRunning(emulator),
-                                    isDeleting: manager.isDeleting(emulator)
-                                )
-                            }
-                            .buttonStyle(.borderless)
+                            EmulatorCard(
+                                emulator: emulator,
+                                isSelected: selectedEmulatorID == emulator.id,
+                                isHovered: hoveredEmulatorID == emulator.id,
+                                isRunning: manager.isRunning(emulator),
+                                isDeleting: manager.isDeleting(emulator)
+                            )
                             .onHover { isHovering in
                                 if isHovering {
                                     hoveredEmulatorID = emulator.id
@@ -192,11 +176,20 @@ struct ContentView: View {
                                     hoveredEmulatorID = nil
                                 }
                             }
-                            .onTapGesture(count: 2) {
-                                launch(emulator)
-                            }
-                            .contextMenu {
-                                cardContextMenu(for: emulator)
+                            .overlay {
+                                CardInteractionView(
+                                    onSingleClick: { _ in
+                                        selectedEmulatorID = emulator.id
+                                    },
+                                    onDoubleClick: {
+                                        selectedEmulatorID = emulator.id
+                                        launch(emulator)
+                                    },
+                                    onRightClick: {
+                                        selectedEmulatorID = emulator.id
+                                    },
+                                    menuActions: menuActions(for: emulator)
+                                )
                             }
                         }
                     }
@@ -323,26 +316,6 @@ struct ContentView: View {
                 }
             )
         ]
-    }
-
-    @ViewBuilder
-    private func cardContextMenu(for emulator: EmulatorInstance) -> some View {
-        ForEach(Array(menuActions(for: emulator).enumerated()), id: \.offset) { _, action in
-            if action.isSeparator {
-                Divider()
-            } else {
-                Button(role: action.isDestructive ? .destructive : nil) {
-                    action.handler()
-                } label: {
-                    if let systemImage = action.systemImage {
-                        Label(action.title, systemImage: systemImage)
-                    } else {
-                        Text(action.title)
-                    }
-                }
-                .disabled(!action.isEnabled)
-            }
-        }
     }
 
     private func launch(_ emulator: EmulatorInstance) {
