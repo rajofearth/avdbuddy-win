@@ -8,6 +8,8 @@ ENV_FILE="${ROOT_DIR}/.env"
 ENV_FILE_ENC="${ROOT_DIR}/.env.enc"
 DEFAULT_RELEASE_REPO="alexstyl/avdbuddy"
 DEFAULT_OUTPUT_DIR="${ROOT_DIR}/output"
+CHANGELOG_PATH="${ROOT_DIR}/CHANGELOG.md"
+SPARKLE_APPCAST_TOOL_PATH="${ROOT_DIR}/.derivedData/sparkle-tools/Build/Products/Release/generate_appcast"
 
 load_env_file() {
   if [[ -f "${ENV_FILE}" ]]; then
@@ -32,6 +34,137 @@ require_cmd() {
     echo "error: Missing command: $1" >&2
     exit 1
   fi
+}
+
+build_generate_appcast_tool() {
+  local sparkle_checkout_dir="$1"
+  local tool_derived_data="${ROOT_DIR}/.derivedData/sparkle-tools"
+
+  [[ -d "${sparkle_checkout_dir}" ]] || fail "Sparkle checkout not found at ${sparkle_checkout_dir}"
+
+  echo "==> Building Sparkle appcast tool" >&2
+  (
+    cd "${sparkle_checkout_dir}"
+    /usr/bin/xcodebuild \
+      -scheme generate_appcast \
+      -configuration Release \
+      -derivedDataPath "${tool_derived_data}" \
+      -destination "platform=macOS" \
+      build >/dev/null
+  )
+
+  [[ -x "${SPARKLE_APPCAST_TOOL_PATH}" ]] || fail "generate_appcast not found at ${SPARKLE_APPCAST_TOOL_PATH}"
+}
+
+ensure_clean_worktree() {
+  if [[ -n "$(git status --short --untracked-files=no)" ]]; then
+    fail "release requires a clean git worktree"
+  fi
+}
+
+extract_unreleased_changelog() {
+  local changelog_path="$1"
+
+  awk '
+    $0 == "## Unreleased" { capture = 1; next }
+    capture && /^## / { capture = 0; exit }
+    capture { lines[++count] = $0 }
+    END {
+      start = 1
+      while (start <= count && lines[start] ~ /^[[:space:]]*$/) {
+        start++
+      }
+
+      end = count
+      while (end >= start && lines[end] ~ /^[[:space:]]*$/) {
+        end--
+      }
+
+      for (i = start; i <= end; i++) {
+        print lines[i]
+      }
+    }
+  ' "${changelog_path}"
+}
+
+promote_changelog_release() {
+  local changelog_path="$1"
+  local version="$2"
+  local release_date="$3"
+  local release_notes_path="$4"
+  local temp_path
+
+  temp_path="$(mktemp)"
+
+  awk -v version="${version}" -v release_date="${release_date}" -v release_notes_path="${release_notes_path}" '
+    BEGIN { state = 0 }
+    {
+      if (state == 0) {
+        print
+        if ($0 == "## Unreleased") {
+          print ""
+          printf "## [%s] - %s\n", version, release_date
+          print ""
+
+          while ((getline note_line < release_notes_path) > 0) {
+            print note_line
+          }
+          close(release_notes_path)
+          print ""
+          state = 1
+        }
+        next
+      }
+
+      if (state == 1) {
+        if ($0 ~ /^## /) {
+          print
+          state = 2
+        }
+        next
+      }
+
+      print
+    }
+  ' "${changelog_path}" > "${temp_path}"
+
+  /bin/mv "${temp_path}" "${changelog_path}"
+}
+
+prepare_release_notes() {
+  local version="$1"
+  local release_date="$2"
+  local release_notes_path="$3"
+
+  [[ -f "${CHANGELOG_PATH}" ]] || fail "CHANGELOG.md not found at ${CHANGELOG_PATH}"
+  rg '^## Unreleased$' "${CHANGELOG_PATH}" >/dev/null || fail "CHANGELOG.md is missing the '## Unreleased' heading"
+
+  extract_unreleased_changelog "${CHANGELOG_PATH}" > "${release_notes_path}"
+  [[ -s "${release_notes_path}" ]] || fail "CHANGELOG.md has no unreleased notes to ship"
+
+  promote_changelog_release "${CHANGELOG_PATH}" "${version}" "${release_date}" "${release_notes_path}"
+}
+
+commit_release_changelog() {
+  local version="$1"
+
+  git add "${CHANGELOG_PATH}"
+  git commit -m "Release ${version}"
+}
+
+push_release_commit_and_tag() {
+  local tag_name="$1"
+  local current_branch
+
+  current_branch="$(git rev-parse --abbrev-ref HEAD)"
+  [[ "${current_branch}" != "HEAD" ]] || fail "release requires a branch checkout, not detached HEAD"
+  if git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null; then
+    fail "local tag ${tag_name} already exists"
+  fi
+
+  git tag "${tag_name}"
+  git push origin "HEAD:${current_branch}"
+  git push origin "refs/tags/${tag_name}"
 }
 
 fail() {
@@ -94,7 +227,7 @@ Versioning:
 
 Optional:
   --repo <owner/name>    GitHub repo for release assets (default: alexstyl/avdbuddy)
-  --notes-file <path>    Release notes markdown file for the GitHub release body
+  --notes-file <path>    Optional markdown file to attach to Sparkle release notes
   --output-dir <path>    Output directory for artifacts
   --dry-run              Build and package locally, but do not publish
   --skip-gh-release      Skip GitHub release creation/upload
@@ -219,17 +352,36 @@ if [[ -n "${BUILD_OVERRIDE}" ]]; then
   BUILD="${BUILD_OVERRIDE}"
 fi
 
+if [[ "${DRY_RUN}" == false && "${SKIP_GH_RELEASE}" == false ]]; then
+  ensure_clean_worktree
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 DERIVED_DATA="${ROOT_DIR}/.derivedData/release-${VERSION}-${BUILD}"
 ARCHIVE_NAME="AvdBuddy-${VERSION}"
 APP_NAME="AvdBuddy.app"
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/${APP_NAME}"
+SPARKLE_CHECKOUT_DIR="${DERIVED_DATA}/SourcePackages/checkouts/Sparkle"
 DMG_STAGING_DIR="${DERIVED_DATA}/dmg-staging"
 DMG_OUTPUT_DIR="${DERIVED_DATA}/dmg-output"
+APPCAST_STAGING_DIR="${DERIVED_DATA}/appcast-staging"
 STAGED_APP_PATH="${DMG_STAGING_DIR}/${APP_NAME}"
 DMG_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}.dmg"
+STABLE_DMG_NAME="AvdBuddy.dmg"
+STABLE_DMG_PATH="${OUTPUT_DIR}/${STABLE_DMG_NAME}"
+APPCAST_PATH="${OUTPUT_DIR}/appcast.xml"
+RELEASE_NOTES_PATH="${DERIVED_DATA}/release-notes.md"
+RELEASE_DATE="$(date '+%Y-%m-%d')"
 TAG_NAME="${VERSION}"
 TITLE="AvdBuddy ${VERSION} (${BUILD})"
+
+if [[ -n "${NOTES_FILE}" ]]; then
+  /bin/mkdir -p "${DERIVED_DATA}"
+  /bin/cp -f "${NOTES_FILE}" "${RELEASE_NOTES_PATH}"
+elif [[ "${DRY_RUN}" == false && "${SKIP_GH_RELEASE}" == false ]]; then
+  /bin/mkdir -p "${DERIVED_DATA}"
+  prepare_release_notes "${VERSION}" "${RELEASE_DATE}" "${RELEASE_NOTES_PATH}"
+fi
 
 echo "==> Building macOS app"
 echo "    version: ${VERSION}"
@@ -326,25 +478,64 @@ fi
 
 echo "    dmg: ${DMG_PATH}"
 
+echo "==> Generating Sparkle appcast"
+/bin/rm -rf "${APPCAST_STAGING_DIR}"
+/bin/mkdir -p "${APPCAST_STAGING_DIR}"
+/bin/cp -f "${DMG_PATH}" "${STABLE_DMG_PATH}"
+/bin/cp -f "${STABLE_DMG_PATH}" "${APPCAST_STAGING_DIR}/${STABLE_DMG_NAME}"
+if [[ -f "${RELEASE_NOTES_PATH}" ]]; then
+  /bin/cp -f "${RELEASE_NOTES_PATH}" "${APPCAST_STAGING_DIR}/AvdBuddy.md"
+fi
+build_generate_appcast_tool "${SPARKLE_CHECKOUT_DIR}"
+GENERATE_APPCAST_ARGS=(
+  --account avdbuddy
+  --maximum-versions 1
+  --download-url-prefix "https://github.com/${RELEASE_REPO}/releases/latest/download/"
+  --link "https://github.com/${RELEASE_REPO}"
+  --embed-release-notes
+  -o "${APPCAST_STAGING_DIR}/appcast.xml"
+  "${APPCAST_STAGING_DIR}"
+)
+if ! "${SPARKLE_APPCAST_TOOL_PATH}" "${GENERATE_APPCAST_ARGS[@]}" >/dev/null; then
+  echo "==> Retrying Sparkle appcast generation" >&2
+  "${SPARKLE_APPCAST_TOOL_PATH}" "${GENERATE_APPCAST_ARGS[@]}" || fail "generate_appcast failed"
+fi
+/bin/cp -f "${APPCAST_STAGING_DIR}/appcast.xml" "${APPCAST_PATH}"
+
+echo "    sparkle dmg: ${STABLE_DMG_PATH}"
+echo "    appcast:     ${APPCAST_PATH}"
+
 if [[ "${DRY_RUN}" == true || "${SKIP_GH_RELEASE}" == true ]]; then
   echo "==> Skipping GitHub release publish"
   exit 0
 fi
 
+if [[ -z "${NOTES_FILE}" ]]; then
+  commit_release_changelog "${VERSION}"
+fi
+push_release_commit_and_tag "${TAG_NAME}"
+
 echo "==> Verifying GitHub auth"
 gh auth status >/dev/null
 
 RELEASE_BODY="Automated macOS release for AvdBuddy."
-if [[ -n "${NOTES_FILE}" ]]; then
-  RELEASE_BODY="$(cat "${NOTES_FILE}")"
+if [[ -f "${RELEASE_NOTES_PATH}" ]]; then
+  RELEASE_BODY="$(cat "${RELEASE_NOTES_PATH}")"
 fi
 
 echo "==> Publishing GitHub release"
 if gh release view "${TAG_NAME}" --repo "${RELEASE_REPO}" >/dev/null 2>&1; then
-  gh release upload "${TAG_NAME}" "${DMG_PATH}" --clobber --repo "${RELEASE_REPO}"
+  gh release upload "${TAG_NAME}" \
+    "${DMG_PATH}" \
+    "${STABLE_DMG_PATH}" \
+    "${APPCAST_PATH}" \
+    --clobber \
+    --repo "${RELEASE_REPO}"
 else
   gh release create "${TAG_NAME}" \
     "${DMG_PATH}" \
+    "${STABLE_DMG_PATH}" \
+    "${APPCAST_PATH}" \
     --title "${TITLE}" \
     --notes "${RELEASE_BODY}" \
     --repo "${RELEASE_REPO}"

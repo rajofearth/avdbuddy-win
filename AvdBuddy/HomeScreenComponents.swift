@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct InfoSheet: View {
+    @EnvironmentObject private var appUpdater: AppUpdater
+
     var body: some View {
         ZStack {
             Color(nsColor: .controlBackgroundColor)
@@ -33,6 +35,13 @@ struct InfoSheet: View {
                 }
                 .font(.system(size: 18, weight: .regular))
                 .foregroundStyle(.purple)
+
+                Button("Check for Updates") {
+                    appUpdater.checkForUpdates()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!appUpdater.canCheckForUpdates)
+                .padding(.top, 8)
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

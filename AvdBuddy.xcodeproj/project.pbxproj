@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		2BD139F9FA799C091BA5938B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 71C665435B9CEEE33249D7E0 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A3134F8E2F532BB3002DCEB6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2BD139F9FA799C091BA5938B /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +95,7 @@
 			);
 			name = AvdBuddy;
 			packageProductDependencies = (
+				71C665435B9CEEE33249D7E0 /* Sparkle */,
 			);
 			productName = AvdBuddy;
 			productReference = A3134F802F532BB2002DCEB6 /* AvdBuddy.app */;
@@ -146,6 +152,9 @@
 			);
 			mainGroup = A3134F772F532BB2002DCEB6;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6E1CBCD6557C1E3F29D03776 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A3134F812F532BB2002DCEB6 /* Products */;
 			projectDirPath = "";
@@ -332,9 +341,8 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "AvdBuddy launches Android Emulator and ADB, which use your local network to discover and communicate with virtual devices.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -363,9 +371,8 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "AvdBuddy launches Android Emulator and ADB, which use your local network to discover and communicate with virtual devices.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -455,6 +462,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6E1CBCD6557C1E3F29D03776 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		71C665435B9CEEE33249D7E0 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6E1CBCD6557C1E3F29D03776 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A3134F782F532BB2002DCEB6 /* Project object */;
 }

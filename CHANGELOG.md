@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added in-app update checks powered by Sparkle, using GitHub Releases for macOS update delivery.
+- Added `Check for Updates` actions in the app menu and the info window.
+
 ## [0.2.0] - 2026-03-1
 
 - Added Android SDK selection and setup flows so the app can detect, validate, override, and persist the SDK path from the UI.
