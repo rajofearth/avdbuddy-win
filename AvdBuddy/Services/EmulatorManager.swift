@@ -102,6 +102,16 @@ final class EmulatorManager: ObservableObject {
         AndroidSDKLocator.autodetectedSDKPath(fileManager: fileManager)
     }
 
+    func hasUsableDeviceFrame(for deviceProfileID: String) -> Bool {
+        guard toolchainStatus.isConfigured else { return false }
+        return Self.skinConfiguration(
+            forDeviceName: deviceProfileID,
+            sdkRootPath: resolvedToolchain().sdkPath,
+            fileManager: fileManager,
+            showDeviceFrame: true
+        ) != nil
+    }
+
     func updateSDKPath(_ sdkPath: String?) {
         let trimmed = sdkPath?.trimmingCharacters(in: .whitespacesAndNewlines)
         sdkPathOverride = trimmed?.isEmpty == false ? trimmed : nil
@@ -471,7 +481,7 @@ final class EmulatorManager: ObservableObject {
         let configURL = avdRootURL
             .appendingPathComponent("\(configuration.avdName).avd")
             .appendingPathComponent("config.ini")
-        try apply(configuration: configuration, to: configURL)
+        try apply(configuration: configuration, to: configURL, sdkRootPath: toolchain.sdkPath)
 
         return """
         $ \(sdkManager) --install \(configuration.packagePath)
@@ -549,7 +559,7 @@ final class EmulatorManager: ObservableObject {
         let configURL = avdRootURL
             .appendingPathComponent("\(configuration.avdName).avd")
             .appendingPathComponent("config.ini")
-        try apply(configuration: configuration, to: configURL)
+        try apply(configuration: configuration, to: configURL, sdkRootPath: toolchain.sdkPath)
 
         return combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -673,10 +683,17 @@ final class EmulatorManager: ObservableObject {
     }
 
     private func launchEmulator(named avdName: String) throws {
-        let emulatorBinary = try requireToolchain(for: "Launching an emulator").emulator
+        let toolchain = try requireToolchain(for: "Launching an emulator")
+        let emulatorBinary = toolchain.emulator
+        var arguments = ["-avd", avdName]
+
+        if let launchSkin = launchSkinConfiguration(forAVDNamed: avdName, sdkRootPath: toolchain.sdkPath) {
+            arguments.append(contentsOf: ["-skindir", launchSkin.directoryPath, "-skin", launchSkin.skinName])
+        }
+
         _ = try runner.run(Command(
             executable: emulatorBinary,
-            arguments: ["-avd", avdName],
+            arguments: arguments,
             waitForExit: false
         ))
     }
@@ -710,6 +727,33 @@ final class EmulatorManager: ObservableObject {
             deviceType: AVDConfigParser.deviceType(from: config),
             colorSeed: AVDConfigParser.colorSeed(from: config)
         )
+    }
+
+    private func launchSkinConfiguration(forAVDNamed avdName: String, sdkRootPath: String) -> (directoryPath: String, skinName: String)? {
+        let configURL = avdDirectoryURL(for: avdName).appendingPathComponent("config.ini")
+        guard let config = try? String(contentsOf: configURL) else { return nil }
+        guard AVDConfigParser.showDeviceFrame(from: config) != false else { return nil }
+
+        if let skinName = AVDConfigParser.skinName(from: config),
+           let skinPath = AVDConfigParser.skinPath(from: config),
+           !skinName.isEmpty,
+           !skinPath.isEmpty {
+            let skinDirectory = URL(fileURLWithPath: skinPath)
+            guard fileManager.fileExists(atPath: skinDirectory.path) else { return nil }
+            return (directoryPath: skinDirectory.deletingLastPathComponent().path, skinName: skinName)
+        }
+
+        guard let deviceName = AVDConfigParser.deviceName(from: config), !deviceName.isEmpty else { return nil }
+
+        guard let skinConfiguration = Self.skinConfiguration(
+            forDeviceName: deviceName,
+            sdkRootPath: sdkRootPath,
+            fileManager: fileManager,
+            showDeviceFrame: true
+        ) else { return nil }
+
+        let skinDirectory = URL(fileURLWithPath: skinConfiguration.path)
+        return (directoryPath: skinDirectory.deletingLastPathComponent().path, skinName: skinConfiguration.name)
     }
 
     private func avdDiskUsageBytes(forAvdNamed avdName: String) -> Int64 {
@@ -820,7 +864,8 @@ final class EmulatorManager: ObservableObject {
 
     private nonisolated static func apply(
         configuration: CreateAVDResolvedConfiguration,
-        to configURL: URL
+        to configURL: URL,
+        sdkRootPath: String
     ) throws {
         let fileManager = FileManager()
         guard fileManager.fileExists(atPath: configURL.path) else { return }
@@ -831,8 +876,33 @@ final class EmulatorManager: ObservableObject {
         replaceOrAppendLine(prefix: "disk.dataPartition.size=", with: "disk.dataPartition.size=\(configuration.storage)", in: &lines)
         replaceOrAppendLine(prefix: "avd.ini.displayname=", with: "avd.ini.displayname=\(configuration.avdName)", in: &lines)
         replaceOrAppendLine(prefix: "avdbuddy.color.seed=", with: "avdbuddy.color.seed=\(configuration.colorSeed)", in: &lines)
+        replaceOrAppendLine(
+            prefix: "showDeviceFrame=",
+            with: "showDeviceFrame=\(configuration.showDeviceFrame ? "yes" : "no")",
+            in: &lines
+        )
+        if let skinConfiguration = skinConfiguration(
+            forDeviceName: configuration.deviceProfileID,
+            sdkRootPath: sdkRootPath,
+            fileManager: fileManager,
+            showDeviceFrame: configuration.showDeviceFrame
+        ) {
+            replaceOrAppendLine(prefix: "skin.name=", with: "skin.name=\(skinConfiguration.name)", in: &lines)
+            replaceOrAppendLine(prefix: "skin.path=", with: "skin.path=\(skinConfiguration.path)", in: &lines)
+            replaceOrAppendLine(prefix: "skin.dynamic=", with: "skin.dynamic=yes", in: &lines)
+        } else {
+            removeLines(prefix: "skin.name=", in: &lines)
+            removeLines(prefix: "skin.path=", in: &lines)
+            removeLines(prefix: "skin.dynamic=", in: &lines)
+        }
         if let ramMB = configuration.ramMB {
             replaceOrAppendLine(prefix: "hw.ramSize=", with: "hw.ramSize=\(ramMB)", in: &lines)
+        }
+        if let initialOrientation = preferredInitialOrientation(
+            forDeviceName: configuration.deviceProfileID,
+            showDeviceFrame: configuration.showDeviceFrame
+        ) {
+            replaceOrAppendLine(prefix: "hw.initialOrientation=", with: "hw.initialOrientation=\(initialOrientation)", in: &lines)
         }
 
         try (lines.joined(separator: "\n") + "\n").write(to: configURL, atomically: true, encoding: .utf8)
@@ -862,6 +932,69 @@ final class EmulatorManager: ObservableObject {
         } else {
             lines.append(replacement)
         }
+    }
+
+    private nonisolated static func removeLines(prefix: String, in lines: inout [String]) {
+        lines.removeAll { $0.hasPrefix(prefix) }
+    }
+
+    private nonisolated static func skinConfiguration(
+        forDeviceName deviceName: String,
+        sdkRootPath: String,
+        fileManager: FileManager,
+        showDeviceFrame: Bool
+    ) -> (name: String, path: String)? {
+        guard showDeviceFrame else { return nil }
+
+        let resolvedSkinName = resolvedSkinName(forDeviceName: deviceName)
+        let skinRoot = URL(fileURLWithPath: sdkRootPath)
+            .appendingPathComponent("skins")
+            .appendingPathComponent(resolvedSkinName)
+        guard fileManager.fileExists(atPath: skinRoot.path) else { return nil }
+
+        let topLevelLayout = skinRoot.appendingPathComponent("layout")
+        if fileManager.fileExists(atPath: topLevelLayout.path) {
+            return (name: resolvedSkinName, path: skinRoot.path)
+        }
+
+        let defaultSkinPath = skinRoot.appendingPathComponent("default")
+        let defaultLayout = defaultSkinPath.appendingPathComponent("layout")
+        if fileManager.fileExists(atPath: defaultLayout.path) {
+            return (name: "default", path: defaultSkinPath.path)
+        }
+
+        return nil
+    }
+
+    private nonisolated static func resolvedSkinName(forDeviceName deviceName: String) -> String {
+        switch deviceName {
+        case "automotive_1024p_landscape",
+             "automotive_1080p_landscape",
+             "automotive_1408p_landscape_with_google_apis",
+             "automotive_1408p_landscape_with_play":
+            return "automotive_landscape"
+        case "automotive_ultrawide":
+            return "automotive_ultrawide_cutout"
+        default:
+            return deviceName
+        }
+    }
+
+    private nonisolated static func preferredInitialOrientation(
+        forDeviceName deviceName: String,
+        showDeviceFrame: Bool
+    ) -> String? {
+        if deviceName.hasPrefix("tv_") {
+            return "landscape"
+        }
+
+        if showDeviceFrame &&
+            deviceName.hasPrefix("automotive_") &&
+            !deviceName.localizedCaseInsensitiveContains("portrait") {
+            return "landscape"
+        }
+
+        return nil
     }
 
     private func replaceOrAppendLine(prefix: String, with replacement: String, in lines: inout [String]) {

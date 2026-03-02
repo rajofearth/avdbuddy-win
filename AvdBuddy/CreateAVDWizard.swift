@@ -328,7 +328,10 @@ struct CreateAVDWizardView: View {
                         Divider()
 
                         settingsRow("Device Profile", systemImage: "iphone.gen3") {
-                            Picker("Device Profile", selection: $model.selection.deviceProfile) {
+                            Picker("Device Profile", selection: Binding(
+                                get: { model.selection.deviceProfile },
+                                set: { model.updateDeviceProfile($0) }
+                            )) {
                                 ForEach(model.selection.deviceType.profileOptions) { profile in
                                     Text(profile.name).tag(profile)
                                 }
@@ -389,6 +392,15 @@ struct CreateAVDWizardView: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .frame(minWidth: 220, alignment: .trailing)
+                    }
+                }
+
+                if model.currentProfileSupportsDeviceFrame {
+                    sectionCard {
+                        settingsRow("Device Frame", systemImage: "iphone") {
+                            Toggle("Show Device Frame", isOn: model.deviceFrameBinding)
+                                .labelsHidden()
+                        }
                     }
                 }
 
@@ -559,6 +571,7 @@ final class CreateAVDWizardModel: ObservableObject {
 
     private unowned let manager: EmulatorManager
     private var lastSuggestedName: String
+    private var rememberedShowDeviceFramePreference = true
 
     init(manager: EmulatorManager) {
         self.manager = manager
@@ -605,6 +618,21 @@ final class CreateAVDWizardModel: ObservableObject {
             googleServices: selection.googleServices
         )
         return architectures.isEmpty ? [] : architectures
+    }
+
+    var currentProfileSupportsDeviceFrame: Bool {
+        manager.hasUsableDeviceFrame(for: selection.deviceProfile.id)
+    }
+
+    var deviceFrameBinding: Binding<Bool> {
+        Binding(
+            get: { self.selection.showDeviceFrame },
+            set: { newValue in self.updateShowDeviceFrame(newValue) }
+        )
+    }
+
+    var currentDeviceTypeSupportsAnyDeviceFrame: Bool {
+        selection.deviceType.profileOptions.contains { manager.hasUsableDeviceFrame(for: $0.id) }
     }
 
     var canGoBack: Bool {
@@ -711,6 +739,11 @@ final class CreateAVDWizardModel: ObservableObject {
         lastSuggestedName = suggestedName
     }
 
+    func updateShowDeviceFrame(_ isEnabled: Bool) {
+        rememberedShowDeviceFramePreference = isEnabled
+        selection.showDeviceFrame = isEnabled
+    }
+
     func syncCustomizationDefaults() {
         selection.googleServices = AndroidSystemImageCatalog.preferredGoogleServicesOption(
             for: selectedRelease,
@@ -722,6 +755,21 @@ final class CreateAVDWizardModel: ObservableObject {
             deviceType: selection.deviceType,
             googleServices: selection.googleServices
         )
+
+        syncDeviceFrameAvailability()
+    }
+
+    func updateDeviceProfile(_ profile: AVDDeviceProfile) {
+        selection.deviceProfile = profile
+        syncDeviceFrameAvailability()
+    }
+
+    private func syncDeviceFrameAvailability() {
+        if !currentProfileSupportsDeviceFrame {
+            selection.showDeviceFrame = false
+        } else {
+            selection.showDeviceFrame = rememberedShowDeviceFramePreference
+        }
     }
 
     func goBack() {

@@ -95,6 +95,30 @@ enum AVDConfigParser {
         value(forKey: "avdbuddy.color.seed", in: config)
     }
 
+    static func deviceName(from config: String) -> String? {
+        value(forKey: "hw.device.name", in: config)
+    }
+
+    static func skinName(from config: String) -> String? {
+        value(forKey: "skin.name", in: config)
+    }
+
+    static func skinPath(from config: String) -> String? {
+        value(forKey: "skin.path", in: config)
+    }
+
+    static func showDeviceFrame(from config: String) -> Bool? {
+        guard let value = value(forKey: "showDeviceFrame", in: config)?.lowercased() else { return nil }
+        switch value {
+        case "yes", "true", "1":
+            return true
+        case "no", "false", "0":
+            return false
+        default:
+            return nil
+        }
+    }
+
     private static func value(forKey key: String, in config: String) -> String? {
         config
             .split(whereSeparator: \.isNewline)

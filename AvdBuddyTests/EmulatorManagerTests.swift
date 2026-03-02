@@ -69,6 +69,7 @@ struct EmulatorManagerTests {
             ramMB: 4096,
             storage: "32GB",
             sdCard: "2048M",
+            showDeviceFrame: true,
             colorSeed: "abcdef123456"
         )
         let didCreate = await manager.createAVD(from: configuration)
@@ -88,8 +89,275 @@ struct EmulatorManagerTests {
         let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Pixel_36_Play.avd/config.ini"))
         #expect(configContents.contains("hw.ramSize=4096"))
         #expect(configContents.contains("disk.dataPartition.size=32GB"))
+        #expect(configContents.contains("showDeviceFrame=yes"))
+        #expect(configContents.contains("skin.dynamic=yes"))
+        #expect(configContents.contains("skin.name=pixel_9"))
+        #expect(configContents.contains("skin.path=\(sdkRoot.appendingPathComponent("skins/pixel_9").path)"))
         #expect(configContents.contains("avdbuddy.color.seed=abcdef123456"))
         #expect(manager.lastCreatedEmulatorName == "Pixel_36_Play")
+    }
+
+    @Test @MainActor
+    func createsResolvedAVDCanDisableDeviceFrame() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.lcd.width=1080
+                hw.lcd.height=2400
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;google_apis_playstore;arm64-v8a",
+            avdName: "Pixel_36_No_Frame",
+            deviceProfileID: "pixel_9",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: false,
+            colorSeed: "123456abcdef"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Pixel_36_No_Frame.avd/config.ini"))
+        #expect(configContents.contains("showDeviceFrame=no"))
+        #expect(!configContents.contains("skin.dynamic="))
+        #expect(!configContents.contains("skin.name="))
+        #expect(!configContents.contains("skin.path="))
+    }
+
+    @Test @MainActor
+    func createsTVAVDWithLandscapeInitialOrientationWhenFrameEnabled() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/tv_1080p"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/tv_1080p/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.device.name=tv_1080p
+                hw.initialOrientation=portrait
+                hw.lcd.width=1920
+                hw.lcd.height=1080
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;android-tv;arm64-v8a",
+            avdName: "TV_1080p_Frame",
+            deviceProfileID: "tv_1080p",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: true,
+            colorSeed: "tvlandscape"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("TV_1080p_Frame.avd/config.ini"))
+        #expect(configContents.contains("hw.initialOrientation=landscape"))
+        #expect(configContents.contains("skin.name=tv_1080p"))
+    }
+
+    @Test @MainActor
+    func createsAutomotiveAVDWithLandscapeInitialOrientationWhenFrameEnabled() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/automotive_landscape"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/automotive_landscape/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.device.name=automotive_1024p_landscape
+                hw.initialOrientation=portrait
+                hw.lcd.width=1024
+                hw.lcd.height=768
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;android-automotive;arm64-v8a",
+            avdName: "Automotive_Frame",
+            deviceProfileID: "automotive_1024p_landscape",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: true,
+            colorSeed: "carlandscape"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Automotive_Frame.avd/config.ini"))
+        #expect(configContents.contains("hw.initialOrientation=landscape"))
+        #expect(configContents.contains("skin.name=automotive_landscape"))
+    }
+
+    @Test @MainActor
+    func createsAutomotivePortraitAVDPreservingInitialOrientationWhenFrameEnabled() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/automotive_large_portrait"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/automotive_large_portrait/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.device.name=automotive_large_portrait
+                hw.initialOrientation=portrait
+                hw.lcd.width=1280
+                hw.lcd.height=1606
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;android-automotive;arm64-v8a",
+            avdName: "Automotive_Portrait_Frame",
+            deviceProfileID: "automotive_large_portrait",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: true,
+            colorSeed: "carportrait"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Automotive_Portrait_Frame.avd/config.ini"))
+        #expect(configContents.contains("hw.initialOrientation=portrait"))
+        #expect(configContents.contains("skin.name=automotive_large_portrait"))
     }
 
     @Test @MainActor
@@ -133,6 +401,308 @@ struct EmulatorManagerTests {
         #expect(runner.commands[0].executable == "\(sdkRoot.path)/emulator/emulator")
         #expect(runner.commands[0].arguments == ["-avd", "Pixel_API_24"])
         #expect(runner.commands[0].waitForExit == false)
+    }
+
+    @Test @MainActor
+    func launchesEmulatorWithDeviceSkinWhenFrameEnabled() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_9"),
+            withIntermediateDirectories: true
+        )
+
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        try createAVDFixture(
+            named: "Pixel_9_Frame",
+            at: tempDirectory,
+            target: "android-36",
+            deviceName: "pixel_9",
+            showDeviceFrame: true,
+            skinName: "pixel_9",
+            skinPath: "\(sdkRoot.path)/skins/pixel_9"
+        )
+
+        let runner = MockRunner()
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        await manager.launch(EmulatorInstance(id: "a", name: "Pixel_9_Frame", apiLevel: 36))
+
+        #expect(runner.commands.count == 1)
+        #expect(runner.commands[0].arguments == [
+            "-avd", "Pixel_9_Frame",
+            "-skindir", "\(sdkRoot.path)/skins",
+            "-skin", "pixel_9"
+        ])
+    }
+
+    @Test @MainActor
+    func createsFoldableAVDUsingRenderableDefaultSubskin() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_fold/default"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_fold/default/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.lcd.width=2208
+                hw.lcd.height=1840
+                hw.device.name=pixel_fold
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;google_apis_playstore;arm64-v8a",
+            avdName: "Pixel_Fold_Frame",
+            deviceProfileID: "pixel_fold",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: true,
+            colorSeed: "foldframe"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Pixel_Fold_Frame.avd/config.ini"))
+        #expect(configContents.contains("skin.name=default"))
+        #expect(configContents.contains("skin.path=\(sdkRoot.appendingPathComponent("skins/pixel_fold/default").path)"))
+    }
+
+    @Test @MainActor
+    func launchesFoldableEmulatorUsingDefaultSubskinWhenConfigured() async throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_fold/default"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_fold/default/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        try createAVDFixture(
+            named: "Pixel_Fold_Frame",
+            at: tempDirectory,
+            target: "android-36",
+            deviceName: "pixel_fold",
+            showDeviceFrame: true,
+            skinName: "default",
+            skinPath: "\(sdkRoot.path)/skins/pixel_fold/default"
+        )
+
+        let runner = MockRunner()
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        await manager.launch(EmulatorInstance(id: "a", name: "Pixel_Fold_Frame", apiLevel: 36))
+
+        #expect(runner.commands.count == 1)
+        #expect(runner.commands[0].arguments == [
+            "-avd", "Pixel_Fold_Frame",
+            "-skindir", "\(sdkRoot.path)/skins/pixel_fold",
+            "-skin", "default"
+        ])
+    }
+
+    @Test @MainActor
+    func reportsUsableDeviceFrameAvailabilityForTopLevelSkin() throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_9/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = EmulatorManager(
+            runner: MockRunner(),
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path
+        )
+
+        #expect(manager.hasUsableDeviceFrame(for: "pixel_9"))
+        #expect(!manager.hasUsableDeviceFrame(for: "desktop_small"))
+    }
+
+    @Test @MainActor
+    func reportsUsableDeviceFrameAvailabilityForFoldableDefaultSubskin() throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_fold/default"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_fold/default/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = EmulatorManager(
+            runner: MockRunner(),
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path
+        )
+
+        #expect(manager.hasUsableDeviceFrame(for: "pixel_fold"))
+    }
+
+    @Test @MainActor
+    func reportsUsableDeviceFrameAvailabilityForAutomotiveMappedSkins() throws {
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/automotive_ultrawide_cutout"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/automotive_ultrawide_cutout/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/automotive_landscape"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/automotive_landscape/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = EmulatorManager(
+            runner: MockRunner(),
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path
+        )
+
+        #expect(manager.hasUsableDeviceFrame(for: "automotive_ultrawide"))
+        #expect(manager.hasUsableDeviceFrame(for: "automotive_1024p_landscape"))
+        #expect(manager.hasUsableDeviceFrame(for: "automotive_1080p_landscape"))
+        #expect(manager.hasUsableDeviceFrame(for: "automotive_1408p_landscape_with_google_apis"))
+    }
+
+    @Test @MainActor
+    func createsAutomotiveLandscapeAVDUsingSharedLandscapeSkin() async throws {
+        let tempDirectory = try temporaryAVDRoot()
+        defer { try? FileManager().removeItem(at: tempDirectory.deletingLastPathComponent()) }
+        let sdkRoot = try temporarySDKRoot()
+        defer { try? FileManager().removeItem(at: sdkRoot) }
+        try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/automotive_landscape"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/automotive_landscape/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let runner = MockRunner()
+        runner.handler = { command in
+            if command.executable == "\(sdkRoot.path)/cmdline-tools/latest/bin/avdmanager",
+               command.arguments.starts(with: ["create", "avd"]) {
+                let name = command.arguments[command.arguments.firstIndex(of: "-n")! + 1]
+                let avdDirectory = tempDirectory.appendingPathComponent("\(name).avd")
+                try? FileManager().createDirectory(at: avdDirectory, withIntermediateDirectories: true)
+                let config = """
+                avd.ini.displayname=\(name)
+                hw.device.name=automotive_1024p_landscape
+                hw.lcd.width=1024
+                hw.lcd.height=768
+                """
+                try? config.write(to: avdDirectory.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)
+                let ini = """
+                path=\(avdDirectory.path)
+                path.rel=avd/\(name).avd
+                target=android-36
+                """
+                try? ini.write(to: tempDirectory.appendingPathComponent("\(name).ini"), atomically: true, encoding: .utf8)
+            }
+            return CommandResult(exitCode: 0, stdout: "", stderr: "")
+        }
+
+        let manager = EmulatorManager(
+            runner: runner,
+            fileManager: FileManager(),
+            sdkPath: sdkRoot.path,
+            avdRootOverride: tempDirectory
+        )
+
+        let configuration = CreateAVDResolvedConfiguration(
+            packagePath: "system-images;android-36;android-automotive;arm64-v8a",
+            avdName: "Automotive_Landscape_Frame",
+            deviceProfileID: "automotive_1024p_landscape",
+            ramMB: nil,
+            storage: "16GB",
+            sdCard: nil,
+            showDeviceFrame: true,
+            colorSeed: "carframe"
+        )
+
+        let didCreate = await manager.createAVD(from: configuration)
+
+        #expect(didCreate)
+        let configContents = try String(contentsOf: tempDirectory.appendingPathComponent("Automotive_Landscape_Frame.avd/config.ini"))
+        #expect(configContents.contains("skin.name=automotive_landscape"))
+        #expect(configContents.contains("skin.path=\(sdkRoot.appendingPathComponent("skins/automotive_landscape").path)"))
     }
 
     @Test @MainActor
@@ -396,9 +966,23 @@ private func createSDKToolchainFixture(at sdkRoot: URL) throws {
         try "#!/bin/sh\n".write(to: fileURL, atomically: true, encoding: .utf8)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fileURL.path)
     }
+
+    try fileManager.createDirectory(
+        at: sdkRoot.appendingPathComponent("skins/pixel_9"),
+        withIntermediateDirectories: true
+    )
 }
 
-private func createAVDFixture(named name: String, at avdRoot: URL, target: String, colorSeed: String? = nil) throws {
+private func createAVDFixture(
+    named name: String,
+    at avdRoot: URL,
+    target: String,
+    colorSeed: String? = nil,
+    deviceName: String = "pixel_9",
+    showDeviceFrame: Bool? = nil,
+    skinName: String? = nil,
+    skinPath: String? = nil
+) throws {
     let fileManager = FileManager()
     let directoryURL = avdRoot.appendingPathComponent("\(name).avd")
     try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -414,8 +998,12 @@ private func createAVDFixture(named name: String, at avdRoot: URL, target: Strin
     let configContents = """
     avd.ini.displayname=\(name)
     target=\(target)
+    hw.device.name=\(deviceName)
     hw.lcd.width=1080
     hw.lcd.height=2400
+    \(showDeviceFrame.map { "showDeviceFrame=\($0 ? "yes" : "no")" } ?? "")
+    \(skinName.map { "skin.name=\($0)" } ?? "")
+    \(skinPath.map { "skin.path=\($0)" } ?? "")
     \(colorSeed.map { "avdbuddy.color.seed=\($0)" } ?? "")
     """
     try configContents.write(to: directoryURL.appendingPathComponent("config.ini"), atomically: true, encoding: .utf8)

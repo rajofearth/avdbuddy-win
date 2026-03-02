@@ -115,6 +115,7 @@ struct AndroidSystemImageCatalog {
             ramMB: selection.ramPreset.megabytes,
             storage: selection.storagePreset.configValue,
             sdCard: selection.sdCardPreset.avdManagerValue,
+            showDeviceFrame: selection.showDeviceFrame,
             colorSeed: EmulatorInstance.fallbackColorSeed(for: selection.avdName)
         )
     }

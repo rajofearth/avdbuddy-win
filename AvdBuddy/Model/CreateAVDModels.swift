@@ -70,7 +70,7 @@ enum CreateAVDDeviceType: String, CaseIterable, Identifiable {
                 .init(id: "automotive_1080p_landscape", name: "1080p Landscape"),
                 .init(id: "automotive_1024p_landscape", name: "1024p Landscape"),
                 .init(id: "automotive_1408p_landscape_with_google_apis", name: "1408p Landscape"),
-                .init(id: "automotive_1408p_landscape_with_play", name: "1408p Landscape with Google Play"),
+                .init(id: "automotive_distant_display", name: "Distant Display"),
                 .init(id: "automotive_large_portrait", name: "Large Portrait"),
                 .init(id: "automotive_portrait", name: "Portrait"),
                 .init(id: "automotive_ultrawide", name: "Ultrawide")
@@ -349,6 +349,7 @@ struct CreateAVDSelection {
     var ramPreset: RAMPreset = .recommended
     var storagePreset: StoragePreset = .gb16
     var sdCardPreset: SDCardPreset = .none
+    var showDeviceFrame = true
 }
 
 struct CreateAVDResolvedConfiguration {
@@ -358,5 +359,6 @@ struct CreateAVDResolvedConfiguration {
     let ramMB: Int?
     let storage: String
     let sdCard: String?
+    let showDeviceFrame: Bool
     let colorSeed: String
 }
