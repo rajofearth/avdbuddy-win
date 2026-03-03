@@ -236,10 +236,10 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("No devices yet")
                 .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(.primary)
             Text("Create your first Android Virtual Device to start building your shelf.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.secondary)
             Button("Create AVD") {
                 presentCreateFlow()
             }
@@ -248,13 +248,13 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(
                 Capsule()
-                    .fill(Color.white.opacity(0.12))
+                    .fill(Color.primary.opacity(0.08))
             )
             .overlay(
                 Capsule()
-                    .stroke(.white.opacity(0.14), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
             )
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             .disabled(!manager.isToolchainConfigured)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
