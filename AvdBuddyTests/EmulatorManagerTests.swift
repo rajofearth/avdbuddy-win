@@ -8,6 +8,15 @@ struct EmulatorManagerTests {
         let sdkRoot = try temporarySDKRoot()
         defer { try? FileManager().removeItem(at: sdkRoot) }
         try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_9"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_9/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let runner = MockRunner()
         runner.handler = { command in
@@ -31,6 +40,15 @@ struct EmulatorManagerTests {
         let sdkRoot = try temporarySDKRoot()
         defer { try? FileManager().removeItem(at: sdkRoot) }
         try createSDKToolchainFixture(at: sdkRoot)
+        try FileManager().createDirectory(
+            at: sdkRoot.appendingPathComponent("skins/pixel_9"),
+            withIntermediateDirectories: true
+        )
+        try "layout".write(
+            to: sdkRoot.appendingPathComponent("skins/pixel_9/layout"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let runner = MockRunner()
         runner.handler = { command in
