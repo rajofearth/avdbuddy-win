@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-03-03
+
+### Added
+- Added an exportable diagnostics report in the info window so you can save a support file with SDK, toolchain, and Android image details when something goes wrong.
+- Added a `Send feedback` shortcut in the info window that copies the support email address so you can quickly get in touch.
+
+### Fixed
+- The home screen's empty state is now visible on light mode.
+
 ## [0.4.0] - 2026-03-02
 
 ### Added
