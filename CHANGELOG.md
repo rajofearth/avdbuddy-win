@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- AvdBuddy now prefetches the Android image catalog from Google on startup and when you switch to a valid SDK, so the Create AVD flow is faster.
+
+### Changed
+- AvdBuddy now requires modern Android Command-line Tools for `sdkmanager` and `avdmanager`, and no longer accepts legacy `tools/bin` binaries as a valid SDK setup.
+
 ## [0.4.1] - 2026-03-03
 
 ### Added
