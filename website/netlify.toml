@@ -1,5 +1,5 @@
 [build]
-  command = "npm --prefix website run build"
+  command = "cd website && npm run build"
   publish = "website/.next"
 
 [[plugins]]
