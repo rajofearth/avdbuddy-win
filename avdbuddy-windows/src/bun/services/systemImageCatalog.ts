@@ -118,6 +118,41 @@ function architecturePriority(arch: string): number {
   }
 }
 
+function hostArchitecturePriority(arch: string): number {
+  const hostArch = process.arch;
+  if (hostArch === "x64") {
+    switch (arch) {
+      case "x86_64":
+        return 0;
+      case "x86":
+        return 1;
+      case "arm64":
+        return 2;
+      case "armv7":
+        return 3;
+      default:
+        return 4;
+    }
+  }
+
+  if (hostArch === "arm64") {
+    switch (arch) {
+      case "arm64":
+        return 0;
+      case "armv7":
+        return 1;
+      case "x86_64":
+        return 2;
+      case "x86":
+        return 3;
+      default:
+        return 4;
+    }
+  }
+
+  return architecturePriority(arch);
+}
+
 function imageSort(a: AndroidSystemImage, b: AndroidSystemImage): number {
   if (a.isInstalled !== b.isInstalled) return a.isInstalled ? -1 : 1;
   const tagA = normalizeTag(a.tag);
@@ -344,7 +379,7 @@ export function availableArchitectures(
       .map((i) => architectureDisplayName(i.abi))
   );
   return [...archs].sort(
-    (a, b) => architecturePriority(a) - architecturePriority(b)
+    (a, b) => hostArchitecturePriority(a) - hostArchitecturePriority(b)
   );
 }
 
