@@ -30,6 +30,10 @@ import { runCommand, runCommandStreaming } from "./commandRunner.ts";
 import { parseSdkManagerOutput, versionFamilies } from "./systemImageCatalog.ts";
 
 let cachedImages: AndroidSystemImage[] | null = null;
+const RECOVERABLE_SDKMANAGER_WARNINGS = [
+  "Dependant package with key emulator not found!",
+  "Unable to compute a complete list of dependencies.",
+] as const;
 
 function appendOutput(
   current: string,
@@ -46,6 +50,65 @@ function commandError(result: CommandResult, fallback: string): string {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   return lines.slice(-6).join("\n") || fallback;
+}
+
+function combinedCommandOutput(result: CommandResult): string {
+  return `${result.stdout}\n${result.stderr}`;
+}
+
+function hasRecoverableSdkManagerWarning(output: string): boolean {
+  return RECOVERABLE_SDKMANAGER_WARNINGS.some((warning) => output.includes(warning));
+}
+
+function parseInstalledPackages(output: string): Set<string> {
+  const installed = new Set<string>();
+  let inInstalledSection = false;
+
+  for (const rawLine of output.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (trimmed === "Installed packages:") {
+      inInstalledSection = true;
+      continue;
+    }
+    if (trimmed === "Available Packages:" || trimmed === "Available Updates:") {
+      inInstalledSection = false;
+      continue;
+    }
+    if (!inInstalledSection || trimmed.length === 0) continue;
+
+    const pkg = trimmed.split("|")[0]?.trim();
+    if (
+      pkg &&
+      pkg !== "Path" &&
+      !/^[-\s]+$/.test(pkg) &&
+      /^[a-z0-9][^|\s]*$/i.test(pkg)
+    ) {
+      installed.add(pkg);
+    }
+  }
+
+  return installed;
+}
+
+async function sdkManagerListResult(sdkPath: string): Promise<CommandResult> {
+  const toolchain = resolveToolchain(sdkPath);
+  return await runCommand(toolchain.sdkManager, [
+    `--sdk_root=${sdkPath}`,
+    "--list",
+  ]);
+}
+
+async function isPackageInstalled(
+  sdkPath: string,
+  packagePath: string
+): Promise<boolean> {
+  const result = await sdkManagerListResult(sdkPath);
+  const output = combinedCommandOutput(result);
+  return parseInstalledPackages(output).has(packagePath);
+}
+
+function logBackendWarning(context: string, detail: string): void {
+  console.warn(`[AvdBuddy] ${context}: ${detail}`);
 }
 
 function avdRootDir(): string {
@@ -330,17 +393,22 @@ export async function loadSystemImages(): Promise<AndroidSystemImage[]> {
   const status = toolchainStatus();
   if (!status.isConfigured) throw new Error(status.summary);
 
-  const toolchain = resolveToolchain(status.sdkPath);
-  const result = await runCommand(toolchain.sdkManager, [
-    `--sdk_root=${status.sdkPath}`,
-    "--list",
-  ]);
+  const result = await sdkManagerListResult(status.sdkPath);
+  const output = combinedCommandOutput(result);
+  const images = parseSdkManagerOutput(output);
   if (result.exitCode !== 0) {
-    throw new Error(
-      commandError(result, "Failed to load Android system images.")
-    );
+    if (images.length > 0 && hasRecoverableSdkManagerWarning(output)) {
+      logBackendWarning(
+        "sdkmanager --list returned warnings",
+        "Proceeding with parsed system images because the output still contains a valid package list."
+      );
+    } else {
+      console.error(`[AvdBuddy] sdkmanager --list failed:\n${output}`);
+      throw new Error(
+        commandError(result, "Failed to load Android system images.")
+      );
+    }
   }
-  const images = parseSdkManagerOutput(result.stdout + "\n" + result.stderr);
   cachedImages = images;
   return images;
 }
@@ -393,13 +461,29 @@ export async function createAVD(
     }
   );
   if (installResult.exitCode !== 0) {
-    return {
-      success: false,
-      output: commandError(
-        installResult,
-        `Failed to install ${config.packagePath}.`
-      ),
-    };
+    const installOutput = combinedCommandOutput(installResult);
+    const recoverableWarning = hasRecoverableSdkManagerWarning(installOutput);
+    const packageInstalled = recoverableWarning
+      ? await isPackageInstalled(status.sdkPath, config.packagePath)
+      : false;
+
+    if (!(recoverableWarning && packageInstalled)) {
+      console.error(
+        `[AvdBuddy] sdkmanager install failed for ${config.packagePath}:\n${installOutput}`
+      );
+      return {
+        success: false,
+        output: commandError(
+          installResult,
+          `Failed to install ${config.packagePath}.`
+        ),
+      };
+    }
+
+    logBackendWarning(
+      `sdkmanager install warning for ${config.packagePath}`,
+      "Package appears to be installed despite dependency warnings, continuing with AVD creation."
+    );
   }
 
   const createArgs = [
@@ -543,3 +627,8 @@ export function validateRenameName(
   }
   return null;
 }
+
+export const __emulatorManagerTestUtils = {
+  hasRecoverableSdkManagerWarning,
+  parseInstalledPackages,
+};
