@@ -205,3 +205,44 @@ describe("resolveHostArchitecture", () => {
     expect(arch).toBe("x64");
   });
 });
+
+describe("emulator local metadata", () => {
+  test("parses emulator source.properties into local package metadata", () => {
+    const metadata =
+      __sdkInstallerTestUtils.emulatorLocalMetadataFromSourceProperties(`
+Pkg.UserSrc=false
+Pkg.Revision=36.4.9
+Pkg.Path=emulator
+Pkg.Desc=Android Emulator
+Pkg.BuildId=14788078
+`);
+
+    expect(metadata).toEqual({
+      packagePath: "emulator",
+      displayName: "Android Emulator",
+      revision: {
+        major: 36,
+        minor: 4,
+        micro: 9,
+      },
+    });
+  });
+
+  test("builds a minimal local package.xml for emulator", () => {
+    const packageXML = __sdkInstallerTestUtils.localPackageXML({
+      packagePath: "emulator",
+      displayName: "Android Emulator",
+      revision: {
+        major: 36,
+        minor: 4,
+        micro: 9,
+      },
+    });
+
+    expect(packageXML).toContain('<localPackage path="emulator" obsolete="false">');
+    expect(packageXML).toContain("<display-name>Android Emulator</display-name>");
+    expect(packageXML).toContain(
+      "<revision><major>36</major><minor>4</minor><micro>9</micro></revision>"
+    );
+  });
+});

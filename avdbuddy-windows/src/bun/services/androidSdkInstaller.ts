@@ -5,7 +5,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
+  writeFileSync,
 } from "fs";
 import { createHash } from "crypto";
 import { tmpdir } from "os";
@@ -55,6 +57,12 @@ interface HostRuntime {
 interface SDKInstallPlan {
   sdkManagerPackages: string[];
   requiresDirectEmulatorInstall: boolean;
+}
+
+interface LocalPackageMetadata {
+  packagePath: string;
+  displayName: string;
+  revision: RepositoryArchive["revision"];
 }
 
 function outputLine(
@@ -167,6 +175,48 @@ function buildInstallPlan(
   return {
     sdkManagerPackages,
     requiresDirectEmulatorInstall,
+  };
+}
+
+function revisionFromVersionString(
+  version: string | null | undefined
+): RepositoryArchive["revision"] | null {
+  const trimmed = version?.trim();
+  if (!trimmed) return null;
+  const [major, minor = "0", micro = "0"] = trimmed.split(".");
+  if (!major || !/^\d+$/.test(major)) return null;
+  if (!/^\d+$/.test(minor) || !/^\d+$/.test(micro)) return null;
+  return {
+    major: Number(major),
+    minor: Number(minor),
+    micro: Number(micro),
+  };
+}
+
+function parseSourceProperties(sourceProperties: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of sourceProperties.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (key.length > 0) values[key] = value;
+  }
+  return values;
+}
+
+function emulatorLocalMetadataFromSourceProperties(
+  sourceProperties: string
+): LocalPackageMetadata | null {
+  const values = parseSourceProperties(sourceProperties);
+  const revision = revisionFromVersionString(values["Pkg.Revision"]);
+  if (!revision) return null;
+  return {
+    packagePath: values["Pkg.Path"]?.trim() || EMULATOR_PACKAGE,
+    displayName: values["Pkg.Desc"]?.trim() || "Android Emulator",
+    revision,
   };
 }
 
@@ -302,6 +352,20 @@ async function fetchLatestEmulatorArchive(
     /^emulator$/,
     "Android emulator"
   );
+}
+
+function localPackageXML(metadata: LocalPackageMetadata): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<ns2:repository xmlns:ns2="http://schemas.android.com/repository/android/common/02" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns5="http://schemas.android.com/repository/android/generic/02">',
+    `  <localPackage path="${metadata.packagePath}" obsolete="false">`,
+    '    <type-details xsi:type="ns5:genericDetailsType"/>',
+    `    <revision><major>${metadata.revision.major}</major><minor>${metadata.revision.minor}</minor><micro>${metadata.revision.micro}</micro></revision>`,
+    `    <display-name>${metadata.displayName}</display-name>`,
+    "  </localPackage>",
+    "</ns2:repository>",
+    "",
+  ].join("\n");
 }
 
 function formatBytes(bytes: number): string {
@@ -531,6 +595,92 @@ function installEmulatorPackage(
   outputLine(onOutput, `Installed emulator package into ${targetDir}.`);
 }
 
+function emulatorPackageXMLPath(sdkPath: string): string {
+  return join(sdkPath, "emulator", "package.xml");
+}
+
+function emulatorSourcePropertiesPath(sdkPath: string): string {
+  return join(sdkPath, "emulator", "source.properties");
+}
+
+function ensureLocalEmulatorPackageMetadata(
+  sdkPath: string,
+  archive?: RepositoryArchive,
+  onOutput?: (chunk: string) => void
+): void {
+  const packageXMLPath = emulatorPackageXMLPath(sdkPath);
+  if (existsSync(packageXMLPath)) return;
+
+  let metadata: LocalPackageMetadata | null = null;
+  const sourcePropertiesPath = emulatorSourcePropertiesPath(sdkPath);
+  if (existsSync(sourcePropertiesPath)) {
+    metadata = emulatorLocalMetadataFromSourceProperties(
+      readFileSync(sourcePropertiesPath, "utf-8")
+    );
+  }
+
+  if (!metadata && archive) {
+    metadata = {
+      packagePath: archive.packagePath,
+      displayName: "Android Emulator",
+      revision: archive.revision,
+    };
+  }
+
+  if (!metadata) {
+    throw new Error(
+      "The Android emulator files were installed, but package metadata could not be created for sdkmanager."
+    );
+  }
+
+  writeFileSync(packageXMLPath, localPackageXML(metadata), "utf-8");
+  outputLine(
+    onOutput,
+    "Registered emulator package metadata so sdkmanager can resolve emulator dependencies."
+  );
+}
+
+async function ensureDirectEmulatorPackageInstalled(
+  sdkPath: string,
+  runtime: HostRuntime,
+  onOutput?: (chunk: string) => void
+): Promise<void> {
+  const status = toolchainStatus(sdkPath);
+  if (toolIsAvailable(status, "emulator")) {
+    ensureLocalEmulatorPackageMetadata(sdkPath, undefined, onOutput);
+    return;
+  }
+
+  outputLine(
+    onOutput,
+    "Windows on Arm detected. Installing the published Windows x64 emulator archive directly."
+  );
+  const archive = await fetchLatestEmulatorArchive(runtime.hostOS);
+  outputLine(
+    onOutput,
+    `Using ${archive.packagePath} revision ${archive.revision.major}.${archive.revision.minor}.${archive.revision.micro} (${basename(archive.url)}).`
+  );
+
+  const tempRoot = mkdtempSync(join(tmpdir(), "avdbuddy-emulator-"));
+  try {
+    const zipPath = join(tempRoot, basename(archive.url));
+    const extractRoot = join(tempRoot, "extracted");
+    await downloadArchive(archive, zipPath, onOutput);
+    await extractArchiveContents(
+      runtime.hostOS,
+      zipPath,
+      extractRoot,
+      "Extracting Android emulator",
+      onOutput
+    );
+    const extracted = findExtractedEmulatorRoot(extractRoot);
+    installEmulatorPackage(extracted, sdkPath, onOutput);
+    ensureLocalEmulatorPackageMetadata(sdkPath, archive, onOutput);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function installBasePackages(
   sdkPath: string,
   runtime: HostRuntime,
@@ -548,6 +698,10 @@ async function installBasePackages(
     }
   );
 
+  if (installPlan.requiresDirectEmulatorInstall) {
+    await ensureDirectEmulatorPackageInstalled(sdkPath, runtime, onOutput);
+  }
+
   await runStreamingCommandChecked(
     toolchain.sdkManager,
     [`--sdk_root=${sdkPath}`, "--install", ...installPlan.sdkManagerPackages],
@@ -559,42 +713,9 @@ async function installBasePackages(
   );
 
   const installedPackages = [...installPlan.sdkManagerPackages];
-  const needsDirectEmulatorInstall =
-    installPlan.requiresDirectEmulatorInstall &&
-    !toolIsAvailable(toolchainStatus(sdkPath), "emulator");
 
   if (installPlan.requiresDirectEmulatorInstall) {
     installedPackages.push(EMULATOR_PACKAGE);
-  }
-
-  if (needsDirectEmulatorInstall) {
-    outputLine(
-      onOutput,
-      "Windows on Arm detected. Installing the published Windows x64 emulator archive directly."
-    );
-    const archive = await fetchLatestEmulatorArchive(runtime.hostOS);
-    outputLine(
-      onOutput,
-      `Using ${archive.packagePath} revision ${archive.revision.major}.${archive.revision.minor}.${archive.revision.micro} (${basename(archive.url)}).`
-    );
-
-    const tempRoot = mkdtempSync(join(tmpdir(), "avdbuddy-emulator-"));
-    try {
-      const zipPath = join(tempRoot, basename(archive.url));
-      const extractRoot = join(tempRoot, "extracted");
-      await downloadArchive(archive, zipPath, onOutput);
-      await extractArchiveContents(
-        runtime.hostOS,
-        zipPath,
-        extractRoot,
-        "Extracting Android emulator",
-        onOutput
-      );
-      const extracted = findExtractedEmulatorRoot(extractRoot);
-      installEmulatorPackage(extracted, sdkPath, onOutput);
-    } finally {
-      rmSync(tempRoot, { recursive: true, force: true });
-    }
   }
 
   return installedPackages;
@@ -659,8 +780,11 @@ export async function autoSetupAndroidSDK(
 
 export const __sdkInstallerTestUtils = {
   buildInstallPlan,
+  emulatorLocalMetadataFromSourceProperties,
   fetchLatestEmulatorArchive,
+  localPackageXML,
   normalizeArchitectureName,
   parseRepositoryArchive,
+  revisionFromVersionString,
   resolveHostArchitecture,
 };
