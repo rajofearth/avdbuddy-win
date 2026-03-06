@@ -1,0 +1,18 @@
+{
+  "name": "avdbuddy-windows",
+  "version": "0.1.0",
+  "description": "Manage Android Virtual Devices without Android Studio — Windows/cross-platform edition",
+  "scripts": {
+    "start": "electrobun dev",
+    "dev": "electrobun dev --watch",
+    "build": "electrobun build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "electrobun": "1.14.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "latest"
+  }
+}
