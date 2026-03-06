@@ -1,4 +1,5 @@
 import type { CommandResult } from "../models/types.ts";
+import { appendFileSync } from "fs";
 
 async function readStream(
   stream: ReadableStream<Uint8Array> | null | undefined,
@@ -54,6 +55,9 @@ export async function runCommand(
   });
 
   if (!waitForExit) {
+    // #region agent log
+    appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "C", location: "commandRunner.ts:56", message: "runCommand spawned detached=false", data: { executable, args, pid: proc.pid, stdinBytes: stdin?.length ?? 0 }, timestamp: Date.now() }) + "\n");
+    // #endregion
     return { exitCode: 0, stdout: "", stderr: "" };
   }
 

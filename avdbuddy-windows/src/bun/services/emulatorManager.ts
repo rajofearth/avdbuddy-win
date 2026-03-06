@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync, renameSync, rmSync } from "fs";
+import { accessSync, appendFileSync, constants, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync, renameSync, rmSync } from "fs";
 import { join, basename, dirname } from "path";
 import { homedir } from "os";
 import type {
@@ -55,6 +55,16 @@ function avdRootDir(): string {
 
 function avdDir(name: string): string {
   return join(avdRootDir(), `${name}.avd`);
+}
+
+function linuxNeedsSoftwareAcceleration(): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function fallbackColorSeed(name: string): string {
@@ -183,20 +193,36 @@ export async function launchEmulator(name: string): Promise<string> {
 
   const toolchain = resolveToolchain(status.sdkPath);
   const args = ["-avd", name];
+  if (linuxNeedsSoftwareAcceleration()) {
+    args.push("-accel", "off", "-gpu", "swiftshader_indirect");
+  }
 
   const configPath = join(avdDir(name), "config.ini");
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "A|B|C|D", location: "emulatorManager.ts:187", message: "launchEmulator entry", data: { name, configPath, sdkPath: toolchain.sdkPath, emulator: toolchain.emulator }, timestamp: Date.now() }) + "\n");
+  // #endregion
   try {
     const config = readFileSync(configPath, "utf-8");
     const showFrame = parseShowDeviceFrame(config);
+    const skinName = parseSkinName(config);
+    const skinPath = parseSkinPath(config);
+    // #region agent log
+    appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "A|B|D", location: "emulatorManager.ts:194", message: "launchEmulator parsed config", data: { name, showFrame, skinName, skinPath, skinPathExists: !!skinPath && existsSync(skinPath) }, timestamp: Date.now() }) + "\n");
+    // #endregion
     if (showFrame !== false) {
-      const skinName = parseSkinName(config);
-      const skinPath = parseSkinPath(config);
       if (skinName && skinPath && existsSync(skinPath)) {
         args.push("-skindir", dirname(skinPath), "-skin", skinName);
       }
     }
-  } catch { /* ignore */ }
+  } catch (error: any) {
+    // #region agent log
+    appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "B|D", location: "emulatorManager.ts:200", message: "launchEmulator config read failed", data: { name, configPath, error: error?.message ?? String(error) }, timestamp: Date.now() }) + "\n");
+    // #endregion
+  }
 
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "A|C|D", location: "emulatorManager.ts:203", message: "launchEmulator spawn args", data: { name, args }, timestamp: Date.now() }) + "\n");
+  // #endregion
   await runCommand(toolchain.emulator, args, { waitForExit: false });
   return `Launched ${name}.`;
 }
@@ -450,6 +476,9 @@ function applyConfiguration(
   }
 
   writeFileSync(configPath, lines.join("\n") + "\n");
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", JSON.stringify({ hypothesisId: "A|B|D", location: "emulatorManager.ts:455", message: "applyConfiguration wrote config", data: { avdName: config.avdName, configPath, showDeviceFrame: config.showDeviceFrame, skinName: lines.find((line) => line.startsWith("skin.name="))?.substring("skin.name=".length) ?? null, skinPath: lines.find((line) => line.startsWith("skin.path="))?.substring("skin.path=".length) ?? null }, timestamp: Date.now() }) + "\n");
+  // #endregion
 }
 
 function rewriteIniFile(iniPath: string, avdName: string): void {
