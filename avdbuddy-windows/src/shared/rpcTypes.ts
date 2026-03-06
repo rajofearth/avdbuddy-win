@@ -11,6 +11,10 @@ export interface AppRPCSchema extends ElectrobunRPCSchema {
         params: { path: string | null };
         response: unknown;
       };
+      autoSetupSDK: {
+        params: { path: string | null };
+        response: unknown;
+      };
       getAutodetectedSDKPath: {
         params: Record<string, never>;
         response: string | null;
@@ -85,6 +89,7 @@ export interface AppRPCSchema extends ElectrobunRPCSchema {
     };
     messages: {
       createProgress: { output: string };
+      sdkSetupProgress: { output: string };
     };
   }>;
   webview: RPCSchema<{

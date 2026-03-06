@@ -407,7 +407,29 @@ body {
 .tool-name { font-weight: 500; flex: 1; }
 .tool-issue { font-size: 11px; color: var(--danger); }
 
+.sdk-help-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: -4px 0 14px;
+}
+
 .sdk-status { font-size: 13px; color: var(--text-secondary); }
+
+.sdk-setup-output {
+  margin-top: 14px;
+  background: #1d1d1f;
+  color: #e0e0e0;
+  border-radius: var(--radius);
+  padding: 14px;
+  font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* Wizard Steps */
 .wizard-step { min-height: 280px; }

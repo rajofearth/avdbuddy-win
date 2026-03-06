@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync, renameSync, rmSync } from "fs";
+import { accessSync, constants, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync, renameSync, rmSync } from "fs";
 import { join, basename, dirname } from "path";
 import { homedir } from "os";
 import type {
@@ -8,6 +8,7 @@ import type {
   AndroidSystemImage,
   AndroidVersionFamily,
   CreateAVDDeviceType,
+  CommandResult,
 } from "../models/types.ts";
 import {
   parseApiLevel,
@@ -30,6 +31,23 @@ import { parseSdkManagerOutput, versionFamilies } from "./systemImageCatalog.ts"
 
 let cachedImages: AndroidSystemImage[] | null = null;
 
+function appendOutput(
+  current: string,
+  chunk: string,
+  onOutput?: (chunk: string) => void
+): string {
+  onOutput?.(chunk);
+  return current + chunk;
+}
+
+function commandError(result: CommandResult, fallback: string): string {
+  const lines = `${result.stdout}\n${result.stderr}`
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.slice(-6).join("\n") || fallback;
+}
+
 function avdRootDir(): string {
   const home = homedir();
   return join(home, ".android", "avd");
@@ -37,6 +55,16 @@ function avdRootDir(): string {
 
 function avdDir(name: string): string {
   return join(avdRootDir(), `${name}.avd`);
+}
+
+function linuxNeedsSoftwareAcceleration(): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function fallbackColorSeed(name: string): string {
@@ -165,20 +193,24 @@ export async function launchEmulator(name: string): Promise<string> {
 
   const toolchain = resolveToolchain(status.sdkPath);
   const args = ["-avd", name];
+  if (linuxNeedsSoftwareAcceleration()) {
+    args.push("-accel", "off", "-gpu", "swiftshader_indirect");
+  }
 
   const configPath = join(avdDir(name), "config.ini");
   try {
     const config = readFileSync(configPath, "utf-8");
     const showFrame = parseShowDeviceFrame(config);
+    const skinName = parseSkinName(config);
+    const skinPath = parseSkinPath(config);
     if (showFrame !== false) {
-      const skinName = parseSkinName(config);
-      const skinPath = parseSkinPath(config);
       if (skinName && skinPath && existsSync(skinPath)) {
         args.push("-skindir", dirname(skinPath), "-skin", skinName);
       }
     }
-  } catch { /* ignore */ }
-
+  } catch {
+    // ignore config overrides
+  }
   await runCommand(toolchain.emulator, args, { waitForExit: false });
   return `Launched ${name}.`;
 }
@@ -299,7 +331,15 @@ export async function loadSystemImages(): Promise<AndroidSystemImage[]> {
   if (!status.isConfigured) throw new Error(status.summary);
 
   const toolchain = resolveToolchain(status.sdkPath);
-  const result = await runCommand(toolchain.sdkManager, ["--list"]);
+  const result = await runCommand(toolchain.sdkManager, [
+    `--sdk_root=${status.sdkPath}`,
+    "--list",
+  ]);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      commandError(result, "Failed to load Android system images.")
+    );
+  }
   const images = parseSdkManagerOutput(result.stdout + "\n" + result.stderr);
   cachedImages = images;
   return images;
@@ -338,22 +378,29 @@ export async function createAVD(
   const toolchain = resolveToolchain(status.sdkPath);
   let output = "";
 
-  const installHeader = `$ ${toolchain.sdkManager} --install ${config.packagePath}\n`;
-  output += installHeader;
-  onOutput?.(installHeader);
+  const installArgs = [`--sdk_root=${status.sdkPath}`, "--install", config.packagePath];
+  const installHeader = `$ ${toolchain.sdkManager} ${installArgs.join(" ")}\n`;
+  output = appendOutput(output, installHeader, onOutput);
 
   const installResult = await runCommandStreaming(
     toolchain.sdkManager,
-    ["--install", config.packagePath],
+    installArgs,
     {
       stdin: "y\n".repeat(32),
       onOutput: (chunk) => {
-        output += chunk;
-        onOutput?.(chunk);
+        output = appendOutput(output, chunk, onOutput);
       },
     }
   );
-  output += installResult.stderr;
+  if (installResult.exitCode !== 0) {
+    return {
+      success: false,
+      output: commandError(
+        installResult,
+        `Failed to install ${config.packagePath}.`
+      ),
+    };
+  }
 
   const createArgs = [
     "create", "avd",
@@ -364,8 +411,7 @@ export async function createAVD(
   if (config.sdCard) createArgs.push("-c", config.sdCard);
 
   const createHeader = `\n\n$ ${toolchain.avdManager} ${createArgs.join(" ")}\n`;
-  output += createHeader;
-  onOutput?.(createHeader);
+  output = appendOutput(output, createHeader, onOutput);
 
   const createResult = await runCommandStreaming(
     toolchain.avdManager,
@@ -373,14 +419,24 @@ export async function createAVD(
     {
       stdin: "no\n",
       onOutput: (chunk) => {
-        output += chunk;
-        onOutput?.(chunk);
+        output = appendOutput(output, chunk, onOutput);
       },
     }
   );
-  output += createResult.stderr;
+  if (createResult.exitCode !== 0) {
+    return {
+      success: false,
+      output: commandError(createResult, `Failed to create ${config.avdName}.`),
+    };
+  }
 
   const configPath = join(avdDir(config.avdName), "config.ini");
+  if (!existsSync(configPath)) {
+    return {
+      success: false,
+      output: `Failed to create ${config.avdName}. The AVD config file was not generated.`,
+    };
+  }
   applyConfiguration(config, configPath, toolchain.sdkPath);
 
   return { success: true, output };
