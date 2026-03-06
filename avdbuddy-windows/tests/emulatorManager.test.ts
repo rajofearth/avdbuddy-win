@@ -45,3 +45,47 @@ Available Packages:
     ]);
   });
 });
+
+describe("normalizeSystemImagePackagePathWithAvailablePackages", () => {
+  test("maps unofficial android-36.1 requests to the newest published extension image", () => {
+    const normalized =
+      __emulatorManagerTestUtils.normalizeSystemImagePackagePathWithAvailablePackages(
+        "system-images;android-36.1;google_apis_playstore;x86_64",
+        [
+          "system-images;android-36;google_apis_playstore;x86_64",
+          "system-images;android-36-ext19;google_apis_playstore;x86_64",
+          "system-images;android-36.0-Baklava;google_apis_playstore;x86_64",
+        ]
+      );
+
+    expect(normalized).toBe(
+      "system-images;android-36-ext19;google_apis_playstore;x86_64"
+    );
+  });
+
+  test("keeps an already-installed exact package path even if it is not in the official feed", () => {
+    const requested = "system-images;android-36.1;google_apis_playstore;x86_64";
+    const normalized =
+      __emulatorManagerTestUtils.normalizeSystemImagePackagePathWithAvailablePackages(
+        requested,
+        [
+          "system-images;android-36;google_apis_playstore;x86_64",
+          "system-images;android-36-ext19;google_apis_playstore;x86_64",
+        ],
+        [requested]
+      );
+
+    expect(normalized).toBe(requested);
+  });
+
+  test("returns the requested package when no compatible official image exists", () => {
+    const requested = "system-images;android-99.1;google_apis_playstore;x86_64";
+    const normalized =
+      __emulatorManagerTestUtils.normalizeSystemImagePackagePathWithAvailablePackages(
+        requested,
+        ["system-images;android-36-ext19;google_apis_playstore;x86_64"]
+      );
+
+    expect(normalized).toBe(requested);
+  });
+});

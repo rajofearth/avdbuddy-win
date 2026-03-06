@@ -19,6 +19,7 @@ import {
   parseSkinPath,
   parseShowDeviceFrame,
 } from "./configParser.ts";
+import { apiLevelFromIdentifier } from "../models/versionCatalog.ts";
 import {
   toolchainStatus,
   resolveToolchain,
@@ -34,6 +35,22 @@ const RECOVERABLE_SDKMANAGER_WARNINGS = [
   "Dependant package with key emulator not found!",
   "Unable to compute a complete list of dependencies.",
 ] as const;
+const SYSTEM_IMAGE_FEED_URLS: Record<string, string> = {
+  default:
+    "https://dl.google.com/android/repository/sys-img/android/sys-img2-1.xml",
+  google_apis:
+    "https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-1.xml",
+  google_apis_playstore:
+    "https://dl.google.com/android/repository/sys-img/google_apis_playstore/sys-img2-1.xml",
+};
+
+const systemImageFeedCache = new Map<string, Promise<Set<string>>>();
+
+interface ParsedSystemImagePackagePath {
+  versionIdentifier: string;
+  tag: string;
+  abi: string;
+}
 
 function appendOutput(
   current: string,
@@ -58,6 +75,16 @@ function combinedCommandOutput(result: CommandResult): string {
 
 function hasRecoverableSdkManagerWarning(output: string): boolean {
   return RECOVERABLE_SDKMANAGER_WARNINGS.some((warning) => output.includes(warning));
+}
+
+function parseSystemImagePackagePath(
+  packagePath: string
+): ParsedSystemImagePackagePath | null {
+  const parts = packagePath.split(";");
+  if (parts.length !== 4 || parts[0] !== "system-images") return null;
+  const [, versionIdentifier, tag, abi] = parts;
+  if (!versionIdentifier || !tag || !abi) return null;
+  return { versionIdentifier, tag, abi };
 }
 
 function parseInstalledPackages(output: string): Set<string> {
@@ -105,6 +132,122 @@ async function isPackageInstalled(
   const result = await sdkManagerListResult(sdkPath);
   const output = combinedCommandOutput(result);
   return parseInstalledPackages(output).has(packagePath);
+}
+
+function systemImageVersionPreference(versionIdentifier: string): {
+  tier: number;
+  extensionLevel: number;
+} {
+  const extMatch = versionIdentifier.match(/^android-\d+-ext(\d+)$/);
+  if (extMatch) {
+    return {
+      tier: 0,
+      extensionLevel: Number(extMatch[1] ?? "0"),
+    };
+  }
+  if (/^android-\d+$/.test(versionIdentifier)) {
+    return { tier: 1, extensionLevel: 0 };
+  }
+  return { tier: 2, extensionLevel: 0 };
+}
+
+function normalizeSystemImagePackagePathWithAvailablePackages(
+  requestedPackagePath: string,
+  availablePackagePaths: Iterable<string>,
+  installedPackagePaths: Iterable<string> = []
+): string {
+  const installed = new Set(installedPackagePaths);
+  if (installed.has(requestedPackagePath)) return requestedPackagePath;
+
+  const parsedRequested = parseSystemImagePackagePath(requestedPackagePath);
+  if (!parsedRequested) return requestedPackagePath;
+
+  const available = new Set(availablePackagePaths);
+  if (available.has(requestedPackagePath)) return requestedPackagePath;
+
+  const requestedApi = apiLevelFromIdentifier(parsedRequested.versionIdentifier);
+  if (requestedApi === null) return requestedPackagePath;
+
+  const candidates = [...available].filter((candidate) => {
+    const parsedCandidate = parseSystemImagePackagePath(candidate);
+    if (!parsedCandidate) return false;
+    if (
+      parsedCandidate.tag !== parsedRequested.tag ||
+      parsedCandidate.abi !== parsedRequested.abi
+    ) {
+      return false;
+    }
+    return apiLevelFromIdentifier(parsedCandidate.versionIdentifier) === requestedApi;
+  });
+
+  const selected = candidates.sort((a, b) => {
+    const parsedA = parseSystemImagePackagePath(a)!;
+    const parsedB = parseSystemImagePackagePath(b)!;
+    const prefA = systemImageVersionPreference(parsedA.versionIdentifier);
+    const prefB = systemImageVersionPreference(parsedB.versionIdentifier);
+    if (prefA.tier !== prefB.tier) return prefA.tier - prefB.tier;
+    if (prefA.extensionLevel !== prefB.extensionLevel) {
+      return prefB.extensionLevel - prefA.extensionLevel;
+    }
+    return parsedB.versionIdentifier.localeCompare(parsedA.versionIdentifier);
+  })[0];
+
+  return selected ?? requestedPackagePath;
+}
+
+async function officialSystemImagePackagePaths(tag: string): Promise<Set<string> | null> {
+  const feedURL = SYSTEM_IMAGE_FEED_URLS[tag];
+  if (!feedURL) return null;
+
+  if (!systemImageFeedCache.has(feedURL)) {
+    systemImageFeedCache.set(
+      feedURL,
+      (async () => {
+        const response = await fetch(feedURL);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to load Android system image metadata (${response.status} ${response.statusText}).`
+          );
+        }
+        const repositoryXML = await response.text();
+        return new Set(
+          [...repositoryXML.matchAll(/<remotePackage path="(system-images;[^"]+)">/g)]
+            .map((match) => match[1])
+            .filter((value): value is string => Boolean(value))
+        );
+      })()
+    );
+  }
+
+  return await systemImageFeedCache.get(feedURL)!;
+}
+
+async function canonicalSystemImagePackagePath(
+  sdkPath: string,
+  requestedPackagePath: string
+): Promise<string> {
+  const parsedRequested = parseSystemImagePackagePath(requestedPackagePath);
+  if (!parsedRequested) return requestedPackagePath;
+
+  try {
+    const officialPackages = await officialSystemImagePackagePaths(parsedRequested.tag);
+    if (!officialPackages) return requestedPackagePath;
+
+    const installedPackages = parseInstalledPackages(
+      combinedCommandOutput(await sdkManagerListResult(sdkPath))
+    );
+    return normalizeSystemImagePackagePathWithAvailablePackages(
+      requestedPackagePath,
+      officialPackages,
+      installedPackages
+    );
+  } catch (error: any) {
+    logBackendWarning(
+      "system image package normalization skipped",
+      error?.message ?? String(error)
+    );
+    return requestedPackagePath;
+  }
 }
 
 function logBackendWarning(context: string, detail: string): void {
@@ -445,8 +588,20 @@ export async function createAVD(
 
   const toolchain = resolveToolchain(status.sdkPath);
   let output = "";
+  const requestedPackagePath = config.packagePath;
+  const resolvedPackagePath = await canonicalSystemImagePackagePath(
+    status.sdkPath,
+    requestedPackagePath
+  );
+  if (resolvedPackagePath !== requestedPackagePath) {
+    const message =
+      `Normalized system image package from ${requestedPackagePath} to ${resolvedPackagePath} ` +
+      "to match Google's published SDK package paths.";
+    logBackendWarning("system image package normalization", message);
+    output = appendOutput(output, `[AvdBuddy] ${message}\n`, onOutput);
+  }
 
-  const installArgs = [`--sdk_root=${status.sdkPath}`, "--install", config.packagePath];
+  const installArgs = [`--sdk_root=${status.sdkPath}`, "--install", resolvedPackagePath];
   const installHeader = `$ ${toolchain.sdkManager} ${installArgs.join(" ")}\n`;
   output = appendOutput(output, installHeader, onOutput);
 
@@ -464,24 +619,24 @@ export async function createAVD(
     const installOutput = combinedCommandOutput(installResult);
     const recoverableWarning = hasRecoverableSdkManagerWarning(installOutput);
     const packageInstalled = recoverableWarning
-      ? await isPackageInstalled(status.sdkPath, config.packagePath)
+      ? await isPackageInstalled(status.sdkPath, resolvedPackagePath)
       : false;
 
     if (!(recoverableWarning && packageInstalled)) {
       console.error(
-        `[AvdBuddy] sdkmanager install failed for ${config.packagePath}:\n${installOutput}`
+        `[AvdBuddy] sdkmanager install failed for ${resolvedPackagePath}:\n${installOutput}`
       );
       return {
         success: false,
         output: commandError(
           installResult,
-          `Failed to install ${config.packagePath}.`
+          `Failed to install ${resolvedPackagePath}.`
         ),
       };
     }
 
     logBackendWarning(
-      `sdkmanager install warning for ${config.packagePath}`,
+      `sdkmanager install warning for ${resolvedPackagePath}`,
       "Package appears to be installed despite dependency warnings, continuing with AVD creation."
     );
   }
@@ -489,7 +644,7 @@ export async function createAVD(
   const createArgs = [
     "create", "avd",
     "-n", config.avdName,
-    "-k", config.packagePath,
+    "-k", resolvedPackagePath,
     "-d", config.deviceProfileID,
   ];
   if (config.sdCard) createArgs.push("-c", config.sdCard);
@@ -630,5 +785,7 @@ export function validateRenameName(
 
 export const __emulatorManagerTestUtils = {
   hasRecoverableSdkManagerWarning,
+  normalizeSystemImagePackagePathWithAvailablePackages,
+  parseSystemImagePackagePath,
   parseInstalledPackages,
 };
