@@ -23,16 +23,16 @@ const ANDROID_REPOSITORY_URL =
   "https://dl.google.com/android/repository/repository2-1.xml";
 const ANDROID_REPOSITORY_BASE_URL =
   "https://dl.google.com/android/repository";
-const REQUIRED_SDK_PACKAGES = [
+const BASE_SDK_PACKAGES = [
   "platform-tools",
-  "emulator",
   "platforms;android-36",
 ] as const;
+const EMULATOR_PACKAGE = "emulator";
 const LICENSE_INPUT = "y\n".repeat(64);
 
 type SupportedHostOS = "linux" | "windows";
 
-interface CommandLineToolsArchive {
+interface RepositoryArchive {
   packagePath: string;
   revision: {
     major: number;
@@ -43,6 +43,18 @@ interface CommandLineToolsArchive {
   checksum: string;
   size: number;
   url: string;
+  channel: number;
+}
+
+interface HostRuntime {
+  platform: NodeJS.Platform;
+  arch: string;
+  hostOS: SupportedHostOS;
+}
+
+interface SDKInstallPlan {
+  sdkManagerPackages: string[];
+  requiresDirectEmulatorInstall: boolean;
 }
 
 function outputLine(
@@ -60,8 +72,20 @@ function supportedHostOS(): SupportedHostOS {
   );
 }
 
-function revisionScore(revision: CommandLineToolsArchive["revision"]): number {
+function currentHostRuntime(): HostRuntime {
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    hostOS: supportedHostOS(),
+  };
+}
+
+function revisionScore(revision: RepositoryArchive["revision"]): number {
   return revision.major * 1_000_000 + revision.minor * 1_000 + revision.micro;
+}
+
+function channelFromBlock(block: string): number {
+  return Number(block.match(/<channelRef ref="channel-(\d+)"/)?.[1] ?? "0");
 }
 
 function toolIsAvailable(
@@ -76,6 +100,23 @@ function toolIsAvailable(
 
 function needsCommandLineTools(status: AndroidToolchainStatus): boolean {
   return !toolIsAvailable(status, "sdkManager") || !toolIsAvailable(status, "avdManager");
+}
+
+function buildInstallPlan(
+  runtime: Pick<HostRuntime, "platform" | "arch">
+): SDKInstallPlan {
+  const sdkManagerPackages: string[] = [...BASE_SDK_PACKAGES];
+  const requiresDirectEmulatorInstall =
+    runtime.platform === "win32" && runtime.arch === "arm64";
+
+  if (!requiresDirectEmulatorInstall) {
+    sdkManagerPackages.splice(1, 0, EMULATOR_PACKAGE);
+  }
+
+  return {
+    sdkManagerPackages,
+    requiresDirectEmulatorInstall,
+  };
 }
 
 async function ensureJavaAvailable(): Promise<void> {
@@ -97,21 +138,32 @@ async function ensureJavaAvailable(): Promise<void> {
 
 function parseRepositoryArchive(
   repositoryXML: string,
-  hostOS: SupportedHostOS
-): CommandLineToolsArchive {
+  hostOS: SupportedHostOS,
+  packageMatcher: RegExp,
+  packageDescription: string,
+  stableOnly = true
+): RepositoryArchive {
   const packages = repositoryXML.matchAll(
-    /<remotePackage path="(cmdline-tools;[^"]+)">([\s\S]*?)<\/remotePackage>/g
+    /<remotePackage path="([^"]+)">([\s\S]*?)<\/remotePackage>/g
   );
 
-  const archives: CommandLineToolsArchive[] = [];
+  const archives: RepositoryArchive[] = [];
   for (const pkg of packages) {
     const packagePath = pkg[1];
     const block = pkg[2];
     if (!packagePath || !block) continue;
-    if (packagePath.includes("alpha") || packagePath.includes("beta") || packagePath.includes("rc")) {
+    if (!packageMatcher.test(packagePath)) continue;
+    if (
+      stableOnly &&
+      (packagePath.includes("alpha") ||
+        packagePath.includes("beta") ||
+        packagePath.includes("rc"))
+    ) {
       continue;
     }
-    if (block.includes("<preview>")) continue;
+    if (stableOnly && (block.includes("<preview>") || channelFromBlock(block) > 0)) {
+      continue;
+    }
 
     const revisionMatch = block.match(
       /<revision>\s*<major>(\d+)<\/major>\s*<minor>(\d+)<\/minor>(?:\s*<micro>(\d+)<\/micro>)?[\s\S]*?<\/revision>/
@@ -145,6 +197,7 @@ function parseRepositoryArchive(
         checksum,
         size,
         url,
+        channel: channelFromBlock(block),
       });
     }
   }
@@ -155,7 +208,7 @@ function parseRepositoryArchive(
 
   if (!selected) {
     throw new Error(
-      `Unable to locate a downloadable Android command-line tools package for ${hostOS}.`
+      `Unable to locate a downloadable ${packageDescription} package for ${hostOS}.`
     );
   }
 
@@ -164,7 +217,7 @@ function parseRepositoryArchive(
 
 async function fetchLatestCommandLineToolsArchive(
   hostOS: SupportedHostOS
-): Promise<CommandLineToolsArchive> {
+): Promise<RepositoryArchive> {
   const response = await fetch(ANDROID_REPOSITORY_URL);
   if (!response.ok) {
     throw new Error(
@@ -173,7 +226,31 @@ async function fetchLatestCommandLineToolsArchive(
   }
 
   const repositoryXML = await response.text();
-  return parseRepositoryArchive(repositoryXML, hostOS);
+  return parseRepositoryArchive(
+    repositoryXML,
+    hostOS,
+    /^cmdline-tools;[^"]+$/,
+    "Android command-line tools"
+  );
+}
+
+async function fetchLatestEmulatorArchive(
+  hostOS: SupportedHostOS
+): Promise<RepositoryArchive> {
+  const response = await fetch(ANDROID_REPOSITORY_URL);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to load Android repository metadata (${response.status} ${response.statusText}).`
+    );
+  }
+
+  const repositoryXML = await response.text();
+  return parseRepositoryArchive(
+    repositoryXML,
+    hostOS,
+    /^emulator$/,
+    "Android emulator"
+  );
 }
 
 function formatBytes(bytes: number): string {
@@ -190,7 +267,7 @@ function formatBytes(bytes: number): string {
 }
 
 async function downloadArchive(
-  archive: CommandLineToolsArchive,
+  archive: RepositoryArchive,
   destinationPath: string,
   onOutput?: (chunk: string) => void
 ): Promise<void> {
@@ -258,7 +335,7 @@ async function downloadArchive(
     .toLowerCase();
   if (sha1 !== archive.checksum) {
     throw new Error(
-      `Checksum mismatch for Android command-line tools. Expected ${archive.checksum}, received ${sha1}.`
+      `Checksum mismatch for ${archive.packagePath}. Expected ${archive.checksum}, received ${sha1}.`
     );
   }
 
@@ -327,12 +404,31 @@ function findExtractedCmdlineToolsRoot(extractRoot: string): string {
   );
 }
 
-async function extractArchive(
+function findExtractedEmulatorRoot(extractRoot: string): string {
+  const binaryName = process.platform === "win32" ? "emulator.exe" : "emulator";
+  const directChild = join(extractRoot, "emulator");
+  if (existsSync(join(directChild, binaryName))) return directChild;
+
+  for (const child of readdirSync(extractRoot)) {
+    const childPath = join(extractRoot, child);
+    if (existsSync(join(childPath, binaryName))) return childPath;
+    if (existsSync(join(childPath, "emulator", binaryName))) {
+      return join(childPath, "emulator");
+    }
+  }
+
+  throw new Error(
+    "Downloaded Android emulator archive did not contain the expected folder structure."
+  );
+}
+
+async function extractArchiveContents(
   hostOS: SupportedHostOS,
   archivePath: string,
   extractRoot: string,
+  action: string,
   onOutput?: (chunk: string) => void
-): Promise<string> {
+): Promise<void> {
   mkdirSync(extractRoot, { recursive: true });
 
   if (hostOS === "windows") {
@@ -348,19 +444,17 @@ async function extractArchive(
           archivePath
         )}' -DestinationPath '${escapePowerShellLiteral(extractRoot)}' -Force`,
       ],
-      "Extracting Android command-line tools",
+      action,
       { onOutput }
     );
   } else {
     await runStreamingCommandChecked(
       "unzip",
       ["-q", archivePath, "-d", extractRoot],
-      "Extracting Android command-line tools",
+      action,
       { onOutput }
     );
   }
-
-  return findExtractedCmdlineToolsRoot(extractRoot);
 }
 
 function installCmdlineTools(
@@ -375,11 +469,24 @@ function installCmdlineTools(
   outputLine(onOutput, `Installed command-line tools into ${targetDir}.`);
 }
 
-async function installBasePackages(
+function installEmulatorPackage(
+  extractedPath: string,
   sdkPath: string,
   onOutput?: (chunk: string) => void
-): Promise<void> {
+): void {
+  const targetDir = join(sdkPath, "emulator");
+  rmSync(targetDir, { recursive: true, force: true });
+  cpSync(extractedPath, targetDir, { recursive: true });
+  outputLine(onOutput, `Installed emulator package into ${targetDir}.`);
+}
+
+async function installBasePackages(
+  sdkPath: string,
+  runtime: HostRuntime,
+  onOutput?: (chunk: string) => void
+): Promise<string[]> {
   const toolchain = resolveToolchain(sdkPath);
+  const installPlan = buildInstallPlan(runtime);
   await runStreamingCommandChecked(
     toolchain.sdkManager,
     [`--sdk_root=${sdkPath}`, "--licenses"],
@@ -392,20 +499,62 @@ async function installBasePackages(
 
   await runStreamingCommandChecked(
     toolchain.sdkManager,
-    [`--sdk_root=${sdkPath}`, "--install", ...REQUIRED_SDK_PACKAGES],
+    [`--sdk_root=${sdkPath}`, "--install", ...installPlan.sdkManagerPackages],
     "Installing Android SDK packages",
     {
       stdin: LICENSE_INPUT,
       onOutput,
     }
   );
+
+  const installedPackages = [...installPlan.sdkManagerPackages];
+  const needsDirectEmulatorInstall =
+    installPlan.requiresDirectEmulatorInstall &&
+    !toolIsAvailable(toolchainStatus(sdkPath), "emulator");
+
+  if (installPlan.requiresDirectEmulatorInstall) {
+    installedPackages.push(EMULATOR_PACKAGE);
+  }
+
+  if (needsDirectEmulatorInstall) {
+    outputLine(
+      onOutput,
+      "Windows on Arm detected. Installing the published Windows x64 emulator archive directly."
+    );
+    const archive = await fetchLatestEmulatorArchive(runtime.hostOS);
+    outputLine(
+      onOutput,
+      `Using ${archive.packagePath} revision ${archive.revision.major}.${archive.revision.minor}.${archive.revision.micro} (${basename(archive.url)}).`
+    );
+
+    const tempRoot = mkdtempSync(join(tmpdir(), "avdbuddy-emulator-"));
+    try {
+      const zipPath = join(tempRoot, basename(archive.url));
+      const extractRoot = join(tempRoot, "extracted");
+      await downloadArchive(archive, zipPath, onOutput);
+      await extractArchiveContents(
+        runtime.hostOS,
+        zipPath,
+        extractRoot,
+        "Extracting Android emulator",
+        onOutput
+      );
+      const extracted = findExtractedEmulatorRoot(extractRoot);
+      installEmulatorPackage(extracted, sdkPath, onOutput);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }
+
+  return installedPackages;
 }
 
 export async function autoSetupAndroidSDK(
   requestedPath: string | null,
   onOutput?: (chunk: string) => void
 ): Promise<AndroidSDKSetupResult> {
-  const hostOS = supportedHostOS();
+  const runtime = currentHostRuntime();
+  const { hostOS } = runtime;
   const sdkPath = requestedPath?.trim() || preferredSDKPath();
   outputLine(onOutput, `Preparing Android SDK in ${sdkPath}`);
 
@@ -426,7 +575,14 @@ export async function autoSetupAndroidSDK(
       const zipPath = join(tempRoot, basename(archive.url));
       const extractRoot = join(tempRoot, "extracted");
       await downloadArchive(archive, zipPath, onOutput);
-      const extracted = await extractArchive(hostOS, zipPath, extractRoot, onOutput);
+      await extractArchiveContents(
+        hostOS,
+        zipPath,
+        extractRoot,
+        "Extracting Android command-line tools",
+        onOutput
+      );
+      const extracted = findExtractedCmdlineToolsRoot(extractRoot);
       installCmdlineTools(extracted, sdkPath, onOutput);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
@@ -435,7 +591,7 @@ export async function autoSetupAndroidSDK(
     outputLine(onOutput, "Android command-line tools already look valid.");
   }
 
-  await installBasePackages(sdkPath, onOutput);
+  const installedPackages = await installBasePackages(sdkPath, runtime, onOutput);
   status = toolchainStatus(sdkPath);
 
   if (!status.isConfigured) {
@@ -445,11 +601,13 @@ export async function autoSetupAndroidSDK(
   outputLine(onOutput, "Android SDK setup finished.");
   return {
     sdkPath,
-    installedPackages: [...REQUIRED_SDK_PACKAGES],
+    installedPackages,
     status,
   };
 }
 
 export const __sdkInstallerTestUtils = {
+  buildInstallPlan,
+  fetchLatestEmulatorArchive,
   parseRepositoryArchive,
 };
