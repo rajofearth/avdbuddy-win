@@ -91,14 +91,19 @@ let wizardFamilies: VersionFamily[] = [];
 let wizardSelectedFamilyID: string | null = null;
 let wizardSelectedVersionID: string | null = null;
 let isCreating = false;
+let isSDKSetupRunning = false;
 
 const rpcConfig = Electroview.defineRPC({
+  maxRequestTime: Infinity,
   handlers: {
     requests: {},
     messages: {
       createProgress: ({ output }: { output: string }) => {
         const el = document.getElementById("create-output");
         if (el) { el.textContent += output; el.scrollTop = el.scrollHeight; }
+      },
+      sdkSetupProgress: ({ output }: { output: string }) => {
+        appendSDKSetupOutput(output);
       },
     },
   },
@@ -203,6 +208,43 @@ function showStatus(message: string, type: "info" | "error" | "success" = "info"
 function showModal(id: string) { document.getElementById(id)!.classList.remove("hidden"); }
 function hideModal(id: string) { document.getElementById(id)!.classList.add("hidden"); }
 
+function appendSDKSetupOutput(output: string) {
+  const el = document.getElementById("sdk-setup-output");
+  if (!el) return;
+  el.classList.remove("hidden");
+  el.textContent += output;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearSDKSetupOutput() {
+  const el = document.getElementById("sdk-setup-output");
+  if (!el) return;
+  el.textContent = "";
+  el.classList.add("hidden");
+}
+
+function setSDKSetupBusy(isBusy: boolean) {
+  isSDKSetupRunning = isBusy;
+  const buttonIDs = ["btn-auto-setup-sdk", "btn-save-sdk", "btn-detect-sdk"];
+  for (const id of buttonIDs) {
+    const button = document.getElementById(id) as HTMLButtonElement | null;
+    if (button) button.disabled = isBusy;
+  }
+
+  const pathInput = document.getElementById("sdk-path-input") as HTMLInputElement | null;
+  if (pathInput) pathInput.disabled = isBusy;
+
+  document.querySelectorAll<HTMLButtonElement>("#sdk-modal [data-close]").forEach((button) => {
+    button.disabled = isBusy;
+  });
+}
+
+function renderSDKStatus(status: any) {
+  (document.getElementById("sdk-path-input") as HTMLInputElement).value = status.sdkPath;
+  renderToolStates(status.toolStates);
+  document.getElementById("sdk-status-message")!.textContent = status.summary;
+}
+
 function setupEventListeners() {
   document.getElementById("btn-refresh")!.addEventListener("click", loadEmulators);
   document.getElementById("btn-settings")!.addEventListener("click", openSDKSetup);
@@ -210,7 +252,14 @@ function setupEventListeners() {
   document.getElementById("btn-create-empty")!.addEventListener("click", openCreateWizard);
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
-    btn.addEventListener("click", () => hideModal((btn as HTMLElement).dataset["close"]!));
+    btn.addEventListener("click", () => {
+      const targetID = (btn as HTMLElement).dataset["close"]!;
+      if (targetID === "sdk-modal" && isSDKSetupRunning) {
+        showStatus("Wait for Android SDK setup to finish.", "info");
+        return;
+      }
+      hideModal(targetID);
+    });
   });
 
   document.addEventListener("click", (e) => {
@@ -220,7 +269,9 @@ function setupEventListeners() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideContextMenu();
-      if (!isCreating) document.querySelectorAll(".modal-overlay:not(.hidden)").forEach((m) => hideModal(m.id));
+      if (!isCreating && !isSDKSetupRunning) {
+        document.querySelectorAll(".modal-overlay:not(.hidden)").forEach((m) => hideModal(m.id));
+      }
     }
     if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -240,6 +291,7 @@ function setupEventListeners() {
 
   document.getElementById("btn-save-sdk")!.addEventListener("click", saveSDKPath);
   document.getElementById("btn-detect-sdk")!.addEventListener("click", detectSDKPath);
+  document.getElementById("btn-auto-setup-sdk")!.addEventListener("click", autoSetupSDK);
   document.getElementById("btn-suggest-name")!.addEventListener("click", suggestName);
   document.getElementById("btn-wizard-next")!.addEventListener("click", wizardNext);
   document.getElementById("btn-wizard-back")!.addEventListener("click", wizardBack);
@@ -271,9 +323,8 @@ async function openSDKSetup() {
   showModal("sdk-modal");
   try {
     const status = await rpc.request.getToolchainStatus({});
-    (document.getElementById("sdk-path-input") as HTMLInputElement).value = status.sdkPath;
-    renderToolStates(status.toolStates);
-    document.getElementById("sdk-status-message")!.textContent = status.summary;
+    renderSDKStatus(status);
+    if (!isSDKSetupRunning) clearSDKSetupOutput();
   } catch (e: any) { console.error("Failed to load SDK status:", e); }
 }
 
@@ -293,8 +344,7 @@ async function saveSDKPath() {
   const path = (document.getElementById("sdk-path-input") as HTMLInputElement).value.trim();
   try {
     const status = await rpc.request.updateSDKPath({ path: path || null });
-    renderToolStates(status.toolStates);
-    document.getElementById("sdk-status-message")!.textContent = status.summary;
+    renderSDKStatus(status);
     if (status.isConfigured) { hideModal("sdk-modal"); showStatus("Android SDK configured.", "success"); await loadEmulators(); }
   } catch (e: any) { showStatus(`Failed: ${e}`, "error"); }
 }
@@ -305,6 +355,29 @@ async function detectSDKPath() {
     if (path) (document.getElementById("sdk-path-input") as HTMLInputElement).value = path;
     else showStatus("Could not detect SDK path.", "info");
   } catch (e: any) { showStatus(`Detection failed: ${e}`, "error"); }
+}
+
+async function autoSetupSDK() {
+  if (isSDKSetupRunning) return;
+
+  clearSDKSetupOutput();
+  appendSDKSetupOutput("Starting Android SDK setup...\n");
+  setSDKSetupBusy(true);
+
+  const path = (document.getElementById("sdk-path-input") as HTMLInputElement).value.trim();
+  try {
+    const result = await rpc.request.autoSetupSDK({ path: path || null });
+    renderSDKStatus(result.status);
+    showStatus("Android SDK installed and configured.", "success");
+    await loadEmulators();
+  } catch (e: any) {
+    const message = e?.message ?? String(e);
+    document.getElementById("sdk-status-message")!.textContent = message;
+    appendSDKSetupOutput(`\nError: ${message}\n`);
+    showStatus(`Auto setup failed: ${message}`, "error");
+  } finally {
+    setSDKSetupBusy(false);
+  }
 }
 
 async function openCreateWizard() {

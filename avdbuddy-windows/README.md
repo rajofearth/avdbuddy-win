@@ -10,14 +10,15 @@ This is the cross-platform companion to the native macOS [AvdBuddy](../README.md
 - Launch, stop, duplicate, rename, and delete emulators
 - Create new AVDs through a guided wizard (device type → name → Android version → customizations)
 - Supports all device types: Phone, Foldable, Tablet, Wear OS, Desktop, TV, Automotive, XR
-- Android SDK auto-detection and configuration
+- Android SDK auto-detection plus one-click setup on Linux and Windows
 - Running emulator status polling
 - Light, minimal UI matching the macOS version
 
 ## Requirements
 
 - [Bun](https://bun.sh) runtime
-- Android SDK with command-line tools (`sdkmanager`, `avdmanager`, `emulator`, `adb`)
+- Java 17 or newer
+- Android SDK is optional up front; AvdBuddy can now bootstrap the command-line tools and base emulator packages for Linux and Windows from the SDK setup modal
 
 ## Getting Started
 

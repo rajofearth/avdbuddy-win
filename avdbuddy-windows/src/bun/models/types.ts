@@ -67,6 +67,12 @@ export interface AndroidToolchainStatus {
   summary: string;
 }
 
+export interface AndroidSDKSetupResult {
+  sdkPath: string;
+  installedPackages: string[];
+  status: AndroidToolchainStatus;
+}
+
 export interface CommandResult {
   exitCode: number;
   stdout: string;

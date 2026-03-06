@@ -22,17 +22,29 @@ export function setStoredSDKPath(path: string | null): void {
   storedSdkPath = trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
-function defaultSDKPath(): string {
+export function platformDefaultSDKPaths(
+  platform: NodeJS.Platform,
+  home: string
+): string[] {
+  if (platform === "win32") {
+    return [join(home, "AppData", "Local", "Android", "Sdk")];
+  }
+  if (platform === "linux") {
+    return [
+      join(home, "Android", "Sdk"),
+      join(home, "Android", "sdk"),
+    ];
+  }
+  return [join(home, "Library", "Android", "sdk")];
+}
+
+export function defaultSDKPath(): string {
   const sdkRoot = process.env["ANDROID_SDK_ROOT"];
   if (sdkRoot && sdkRoot.length > 0) return sdkRoot;
   const androidHome = process.env["ANDROID_HOME"];
   if (androidHome && androidHome.length > 0) return androidHome;
   const home = homedir();
-  const platform = process.platform;
-  if (platform === "win32") {
-    return join(home, "AppData", "Local", "Android", "Sdk");
-  }
-  return join(home, "Library", "Android", "sdk");
+  return platformDefaultSDKPaths(process.platform, home)[0]!;
 }
 
 function candidateSDKPaths(): string[] {
@@ -44,11 +56,7 @@ function candidateSDKPaths(): string[] {
     process.env["ANDROID_HOME"],
   ];
 
-  if (platform === "win32") {
-    candidates.push(join(home, "AppData", "Local", "Android", "Sdk"));
-  } else {
-    candidates.push(join(home, "Library", "Android", "sdk"));
-  }
+  candidates.push(...platformDefaultSDKPaths(platform, home));
 
   const unique: string[] = [];
   for (const c of candidates) {

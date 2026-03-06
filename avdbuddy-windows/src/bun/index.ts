@@ -3,6 +3,7 @@ import {
   getToolchainStatus,
   getAutodetectedSDKPath,
   updateSDKPath,
+  invalidateImageCache,
   refreshEmulators,
   getRunningEmulators,
   launchEmulator,
@@ -16,6 +17,7 @@ import {
   validateNewName,
   validateRenameName,
 } from "./services/emulatorManager.ts";
+import { autoSetupAndroidSDK } from "./services/androidSdkInstaller.ts";
 import { getProfileOptions, randomSuggestedName } from "./models/deviceProfiles.ts";
 import {
   availableGoogleServiceOptions,
@@ -28,6 +30,20 @@ const rpc = defineElectrobunRPC("bun" as const, {
     requests: {
       getToolchainStatus: () => getToolchainStatus(),
       updateSDKPath: ({ path }: any) => updateSDKPath(path),
+      autoSetupSDK: async ({ path }: any) => {
+        const result = await autoSetupAndroidSDK(path, (chunk: string) => {
+          try {
+            (rpc as any).send?.sdkSetupProgress?.({ output: chunk });
+          } catch {
+            // view not ready
+          }
+        });
+        invalidateImageCache();
+        return {
+          ...result,
+          status: updateSDKPath(result.sdkPath),
+        };
+      },
       getAutodetectedSDKPath: () => getAutodetectedSDKPath(),
       refreshEmulators: async () => {
         const emulators = refreshEmulators();
