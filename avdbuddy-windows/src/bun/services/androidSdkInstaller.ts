@@ -72,10 +72,61 @@ function supportedHostOS(): SupportedHostOS {
   );
 }
 
-function currentHostRuntime(): HostRuntime {
+function normalizeArchitectureName(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "arm64" || normalized === "aarch64") return "arm64";
+  if (normalized === "x64" || normalized === "amd64" || normalized === "x86_64") {
+    return "x64";
+  }
+  if (normalized === "x86" || normalized === "i386" || normalized === "i686") {
+    return "x86";
+  }
+  return normalized;
+}
+
+function resolveHostArchitecture(
+  platform: NodeJS.Platform,
+  processArch: string,
+  windowsOSArch: string | null
+): string {
+  if (platform === "win32") {
+    return normalizeArchitectureName(windowsOSArch) ?? normalizeArchitectureName(processArch) ?? processArch;
+  }
+  return normalizeArchitectureName(processArch) ?? processArch;
+}
+
+async function detectWindowsOSArchitecture(): Promise<string | null> {
+  if (process.platform !== "win32") return null;
+
+  const envCandidates = [
+    process.env["PROCESSOR_ARCHITEW6432"],
+    process.env["PROCESSOR_ARCHITECTURE"],
+  ];
+  for (const candidate of envCandidates) {
+    const normalized = normalizeArchitectureName(candidate);
+    if (normalized === "arm64") return normalized;
+  }
+
+  try {
+    const result = await runCommand("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()",
+    ]);
+    if (result.exitCode !== 0) return null;
+    return normalizeArchitectureName(result.stdout);
+  } catch {
+    return null;
+  }
+}
+
+async function currentHostRuntime(): Promise<HostRuntime> {
+  const windowsOSArch = await detectWindowsOSArchitecture();
   return {
     platform: process.platform,
-    arch: process.arch,
+    arch: resolveHostArchitecture(process.platform, process.arch, windowsOSArch),
     hostOS: supportedHostOS(),
   };
 }
@@ -553,7 +604,7 @@ export async function autoSetupAndroidSDK(
   requestedPath: string | null,
   onOutput?: (chunk: string) => void
 ): Promise<AndroidSDKSetupResult> {
-  const runtime = currentHostRuntime();
+  const runtime = await currentHostRuntime();
   const { hostOS } = runtime;
   const sdkPath = requestedPath?.trim() || preferredSDKPath();
   outputLine(onOutput, `Preparing Android SDK in ${sdkPath}`);
@@ -609,5 +660,7 @@ export async function autoSetupAndroidSDK(
 export const __sdkInstallerTestUtils = {
   buildInstallPlan,
   fetchLatestEmulatorArchive,
+  normalizeArchitectureName,
   parseRepositoryArchive,
+  resolveHostArchitecture,
 };

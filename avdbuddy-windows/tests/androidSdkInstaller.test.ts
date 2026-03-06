@@ -177,3 +177,31 @@ describe("buildInstallPlan", () => {
     expect(plan.requiresDirectEmulatorInstall).toBe(true);
   });
 });
+
+describe("resolveHostArchitecture", () => {
+  test("normalizes Windows architecture names", () => {
+    expect(__sdkInstallerTestUtils.normalizeArchitectureName("AMD64")).toBe("x64");
+    expect(__sdkInstallerTestUtils.normalizeArchitectureName("Arm64")).toBe("arm64");
+    expect(__sdkInstallerTestUtils.normalizeArchitectureName("x86_64")).toBe("x64");
+  });
+
+  test("prefers the native Windows OS architecture over an emulated process architecture", () => {
+    const arch = __sdkInstallerTestUtils.resolveHostArchitecture(
+      "win32",
+      "x64",
+      "ARM64"
+    );
+
+    expect(arch).toBe("arm64");
+  });
+
+  test("falls back to process architecture when no native Windows architecture is detected", () => {
+    const arch = __sdkInstallerTestUtils.resolveHostArchitecture(
+      "win32",
+      "x64",
+      null
+    );
+
+    expect(arch).toBe("x64");
+  });
+});
