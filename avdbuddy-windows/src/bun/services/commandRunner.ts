@@ -43,12 +43,17 @@ async function readStream(
 export async function runCommand(
   executable: string,
   args: string[],
-  options: { stdin?: string; waitForExit?: boolean } = {}
+  options: {
+    stdin?: string;
+    waitForExit?: boolean;
+    env?: Record<string, string | undefined>;
+  } = {}
 ): Promise<CommandResult> {
-  const { stdin, waitForExit = true } = options;
+  const { stdin, waitForExit = true, env } = options;
 
   if (!waitForExit) {
     const proc = Bun.spawn([executable, ...args], {
+      env,
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
@@ -59,6 +64,7 @@ export async function runCommand(
   }
 
   const proc = Bun.spawn([executable, ...args], {
+    env,
     stdin: stdin ? new Blob([stdin]) : undefined,
     stdout: "pipe",
     stderr: "pipe",
@@ -81,11 +87,13 @@ export async function runCommandStreaming(
     stdin?: string;
     onOutput?: (chunk: string) => void;
     shouldCancel?: () => boolean;
+    env?: Record<string, string | undefined>;
   } = {}
 ): Promise<CommandResult> {
-  const { stdin, onOutput, shouldCancel } = options;
+  const { stdin, onOutput, shouldCancel, env } = options;
 
   const proc = Bun.spawn([executable, ...args], {
+    env,
     stdin: stdin ? new Blob([stdin]) : undefined,
     stdout: "pipe",
     stderr: "pipe",

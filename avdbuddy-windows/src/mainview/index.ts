@@ -52,6 +52,14 @@ const API_NAMES: Record<number, string> = {
   24: "Android 7.0",
 };
 
+const TOOL_LABELS: Record<string, string> = {
+  java: "Java 17+",
+  sdkManager: "sdkmanager",
+  avdManager: "avdmanager",
+  emulator: "emulator",
+  adb: "adb",
+};
+
 const GRADIENT_PALETTES = [
   ["#667eea", "#764ba2"], ["#f093fb", "#f5576c"], ["#4facfe", "#00f2fe"],
   ["#43e97b", "#38f9d7"], ["#fa709a", "#fee140"], ["#a18cd1", "#fbc2eb"],
@@ -332,9 +340,10 @@ function renderToolStates(states: any[]) {
   document.getElementById("sdk-tool-list")!.innerHTML = states.map((s: any) => {
     const ok = s.validationStatus.kind === "available";
     const issue = s.validationStatus.kind === "missing" ? "Not found" : s.validationStatus.kind === "unsupported" ? s.validationStatus.message : "";
+    const label = TOOL_LABELS[s.tool] ?? s.tool;
     return `<div class="tool-item">
       <span class="tool-status ${ok ? "ok" : "error"}">${ok ? "✓" : "✗"}</span>
-      <span class="tool-name">${s.tool}</span>
+      <span class="tool-name">${label}</span>
       ${issue ? `<span class="tool-issue">${escapeHtml(issue)}</span>` : ""}
     </div>`;
   }).join("");

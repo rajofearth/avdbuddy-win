@@ -33,15 +33,18 @@ export const deviceTypeLabel: Record<EmulatorDeviceType, string> = {
 
 export interface AndroidToolchain {
   sdkPath: string;
+  javaHome: string | null;
+  java: string;
   sdkManager: string;
   avdManager: string;
   emulator: string;
   adb: string;
 }
 
-export type AndroidTool = "sdkManager" | "avdManager" | "emulator" | "adb";
+export type AndroidTool = "java" | "sdkManager" | "avdManager" | "emulator" | "adb";
 
 export const androidToolTitle: Record<AndroidTool, string> = {
+  java: "Java 17+",
   sdkManager: "sdkmanager",
   avdManager: "avdmanager",
   emulator: "emulator",
