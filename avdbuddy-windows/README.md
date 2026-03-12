@@ -17,8 +17,8 @@ This is the cross-platform companion to the native macOS [AvdBuddy](../README.md
 ## Requirements
 
 - [Bun](https://bun.sh) runtime
-- Java 17 or newer
-- Android SDK is optional up front; AvdBuddy can now bootstrap the command-line tools and base emulator packages for Linux and Windows from the SDK setup modal
+- Java 17 or newer is optional up front; AvdBuddy can install and manage a compatible Java runtime for Linux and Windows during Auto Setup
+- Android SDK is optional up front; AvdBuddy can bootstrap the command-line tools and base emulator packages from the SDK setup modal
 
 ## Getting Started
 

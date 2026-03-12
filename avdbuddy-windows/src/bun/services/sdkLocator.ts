@@ -8,8 +8,9 @@ import type {
   AndroidTool,
   ValidationStatus,
 } from "../models/types.ts";
+import { resolveJavaRuntime } from "./javaRuntime.ts";
 
-const ALL_TOOLS: AndroidTool[] = ["sdkManager", "avdManager", "emulator", "adb"];
+const ALL_TOOLS: AndroidTool[] = ["java", "sdkManager", "avdManager", "emulator", "adb"];
 
 let storedSdkPath: string | null = null;
 
@@ -121,8 +122,11 @@ function cmdlineToolBinary(binaryName: string, sdkPath: string): string {
 
 export function resolveToolchain(sdkPath: string): AndroidToolchain {
   const ext = process.platform === "win32" ? ".exe" : "";
+  const java = resolveJavaRuntime();
   return {
     sdkPath,
+    javaHome: java.home,
+    java: java.executable,
     sdkManager: cmdlineToolBinary("sdkmanager", sdkPath),
     avdManager: cmdlineToolBinary("avdmanager", sdkPath),
     emulator: join(sdkPath, "emulator", "emulator" + ext),
@@ -161,9 +165,25 @@ export function toolchainStatus(sdkPath?: string): AndroidToolchainStatus {
     sdkPath?.trim() || storedSdkPath || autodetectedSDKPath() || defaultSDKPath();
   const toolchain = resolveToolchain(effectivePath);
   const isOverride = storedSdkPath === effectivePath;
+  const java = resolveJavaRuntime();
 
   const toolStates: AndroidToolState[] = ALL_TOOLS.map((tool) => {
-    const path = toolchain[tool === "sdkManager" ? "sdkManager" : tool === "avdManager" ? "avdManager" : tool];
+    if (tool === "java") {
+      return {
+        tool,
+        path: java.displayPath,
+        validationStatus: java.validationStatus,
+      };
+    }
+
+    const path =
+      toolchain[
+        tool === "sdkManager"
+          ? "sdkManager"
+          : tool === "avdManager"
+            ? "avdManager"
+            : tool
+      ];
     return {
       tool,
       path,
@@ -181,7 +201,17 @@ export function toolchainStatus(sdkPath?: string): AndroidToolchainStatus {
 
   let summary = "Android SDK ready.";
   if (!isConfigured) {
-    if (unsupported.length > 0) {
+    const unsupportedJava = unsupported.find((s) => s.tool === "java");
+    if (unsupportedJava?.validationStatus.kind === "unsupported") {
+      const missingWithoutJava = missing
+        .filter((s) => s.tool !== "java")
+        .map((s) => s.tool)
+        .join(", ");
+      summary = unsupportedJava.validationStatus.message;
+      if (missingWithoutJava.length > 0) {
+        summary = `${summary} Missing ${missingWithoutJava}.`;
+      }
+    } else if (unsupported.length > 0) {
       const names = unsupported.map((s) => s.tool).join(", ");
       if (missing.length === 0) {
         summary = `Deprecated ${names} found under tools/bin. Install Android Command-line Tools.`;

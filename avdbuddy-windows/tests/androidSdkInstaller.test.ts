@@ -177,3 +177,25 @@ describe("buildInstallPlan", () => {
     expect(plan.requiresDirectEmulatorInstall).toBe(true);
   });
 });
+
+describe("javaArchitectureCandidates", () => {
+  test("prefers native Linux arm64 Java archives", () => {
+    expect(
+      __sdkInstallerTestUtils.javaArchitectureCandidates({
+        platform: "linux",
+        arch: "arm64",
+        hostOS: "linux",
+      })
+    ).toEqual(["aarch64"]);
+  });
+
+  test("falls back to Windows x64 Java on Windows arm64", () => {
+    expect(
+      __sdkInstallerTestUtils.javaArchitectureCandidates({
+        platform: "win32",
+        arch: "arm64",
+        hostOS: "windows",
+      })
+    ).toEqual(["aarch64", "x64"]);
+  });
+});

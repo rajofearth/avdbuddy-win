@@ -26,6 +26,7 @@ import {
   autodetectedSDKPath,
   preferredSDKPath,
 } from "./sdkLocator.ts";
+import { javaEnvironment } from "./javaRuntime.ts";
 import { runCommand, runCommandStreaming } from "./commandRunner.ts";
 import { parseSdkManagerOutput, versionFamilies } from "./systemImageCatalog.ts";
 
@@ -140,8 +141,9 @@ export async function getRunningEmulators(): Promise<Set<string>> {
   if (!status.isConfigured) return new Set();
 
   const toolchain = resolveToolchain(status.sdkPath);
+  const env = javaEnvironment(toolchain.javaHome);
   try {
-    const result = await runCommand(toolchain.adb, ["devices"]);
+    const result = await runCommand(toolchain.adb, ["devices"], { env });
     const serials = result.stdout
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -150,7 +152,7 @@ export async function getRunningEmulators(): Promise<Set<string>> {
 
     const names = new Set<string>();
     for (const serial of serials) {
-      const name = await getAvdName(serial, toolchain.adb);
+      const name = await getAvdName(serial, toolchain.adb, env);
       if (name) names.add(name);
     }
     return names;
@@ -161,18 +163,19 @@ export async function getRunningEmulators(): Promise<Set<string>> {
 
 async function getAvdName(
   serial: string,
-  adb: string
+  adb: string,
+  env?: Record<string, string | undefined>
 ): Promise<string | null> {
   try {
     const r1 = await runCommand(adb, [
       "-s", serial, "shell", "getprop", "ro.boot.qemu.avd_name",
-    ]);
+    ], { env });
     const name1 = parseAvdNameFromOutput(r1.stdout);
     if (name1) return name1;
   } catch { /* ignore */ }
 
   try {
-    const r2 = await runCommand(adb, ["-s", serial, "emu", "avd", "name"]);
+    const r2 = await runCommand(adb, ["-s", serial, "emu", "avd", "name"], { env });
     return parseAvdNameFromOutput(r2.stdout);
   } catch {
     return null;
@@ -192,6 +195,7 @@ export async function launchEmulator(name: string): Promise<string> {
   if (!status.isConfigured) throw new Error(status.summary);
 
   const toolchain = resolveToolchain(status.sdkPath);
+  const env = javaEnvironment(toolchain.javaHome);
   const args = ["-avd", name];
   if (linuxNeedsSoftwareAcceleration()) {
     args.push("-accel", "off", "-gpu", "swiftshader_indirect");
@@ -211,7 +215,7 @@ export async function launchEmulator(name: string): Promise<string> {
   } catch {
     // ignore config overrides
   }
-  await runCommand(toolchain.emulator, args, { waitForExit: false });
+  await runCommand(toolchain.emulator, args, { env, waitForExit: false });
   return `Launched ${name}.`;
 }
 
@@ -220,7 +224,8 @@ export async function stopEmulator(name: string): Promise<string> {
   if (!status.isConfigured) throw new Error(status.summary);
 
   const toolchain = resolveToolchain(status.sdkPath);
-  const devicesResult = await runCommand(toolchain.adb, ["devices"]);
+  const env = javaEnvironment(toolchain.javaHome);
+  const devicesResult = await runCommand(toolchain.adb, ["devices"], { env });
   const serials = devicesResult.stdout
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -228,9 +233,9 @@ export async function stopEmulator(name: string): Promise<string> {
     .map((l) => l.split("\t")[0]!);
 
   for (const serial of serials) {
-    const avdName = await getAvdName(serial, toolchain.adb);
+    const avdName = await getAvdName(serial, toolchain.adb, env);
     if (avdName === name) {
-      await runCommand(toolchain.adb, ["-s", serial, "emu", "kill"]);
+      await runCommand(toolchain.adb, ["-s", serial, "emu", "kill"], { env });
       return `Stopped ${name}.`;
     }
   }
@@ -242,7 +247,9 @@ export async function deleteEmulator(name: string): Promise<string> {
   if (!status.isConfigured) throw new Error(status.summary);
 
   const toolchain = resolveToolchain(status.sdkPath);
-  await runCommand(toolchain.avdManager, ["delete", "avd", "-n", name]);
+  await runCommand(toolchain.avdManager, ["delete", "avd", "-n", name], {
+    env: javaEnvironment(toolchain.javaHome),
+  });
   return `Deleted ${name}.`;
 }
 
@@ -331,10 +338,11 @@ export async function loadSystemImages(): Promise<AndroidSystemImage[]> {
   if (!status.isConfigured) throw new Error(status.summary);
 
   const toolchain = resolveToolchain(status.sdkPath);
+  const env = javaEnvironment(toolchain.javaHome);
   const result = await runCommand(toolchain.sdkManager, [
     `--sdk_root=${status.sdkPath}`,
     "--list",
-  ]);
+  ], { env });
   if (result.exitCode !== 0) {
     throw new Error(
       commandError(result, "Failed to load Android system images.")
@@ -376,6 +384,7 @@ export async function createAVD(
     return { success: false, output: status.summary };
 
   const toolchain = resolveToolchain(status.sdkPath);
+  const env = javaEnvironment(toolchain.javaHome);
   let output = "";
 
   const installArgs = [`--sdk_root=${status.sdkPath}`, "--install", config.packagePath];
@@ -386,6 +395,7 @@ export async function createAVD(
     toolchain.sdkManager,
     installArgs,
     {
+      env,
       stdin: "y\n".repeat(32),
       onOutput: (chunk) => {
         output = appendOutput(output, chunk, onOutput);
@@ -417,6 +427,7 @@ export async function createAVD(
     toolchain.avdManager,
     createArgs,
     {
+      env,
       stdin: "no\n",
       onOutput: (chunk) => {
         output = appendOutput(output, chunk, onOutput);

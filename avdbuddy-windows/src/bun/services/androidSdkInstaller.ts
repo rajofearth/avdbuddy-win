@@ -16,13 +16,22 @@ import type {
   AndroidToolchainStatus,
   CommandResult,
 } from "../models/types.ts";
-import { runCommand, runCommandStreaming } from "./commandRunner.ts";
+import { runCommandStreaming } from "./commandRunner.ts";
+import {
+  MINIMUM_JAVA_FEATURE_VERSION,
+  javaEnvironment,
+  managedJavaHome,
+  managedJavaRoot,
+  resolveJavaRuntime,
+} from "./javaRuntime.ts";
 import { preferredSDKPath, resolveToolchain, toolchainStatus } from "./sdkLocator.ts";
 
 const ANDROID_REPOSITORY_URL =
   "https://dl.google.com/android/repository/repository2-1.xml";
 const ANDROID_REPOSITORY_BASE_URL =
   "https://dl.google.com/android/repository";
+const TEMURIN_API_URL = "https://api.adoptium.net/v3/assets/latest/17/hotspot";
+const DOWNLOAD_USER_AGENT = "AvdBuddy/1.0";
 const BASE_SDK_PACKAGES = [
   "platform-tools",
   "platforms;android-36",
@@ -55,6 +64,28 @@ interface HostRuntime {
 interface SDKInstallPlan {
   sdkManagerPackages: string[];
   requiresDirectEmulatorInstall: boolean;
+}
+
+type DownloadChecksumAlgorithm = "sha1" | "sha256";
+
+interface DownloadableArchive {
+  packagePath: string;
+  checksum: string;
+  checksumAlgorithm: DownloadChecksumAlgorithm;
+  downloadURL: string;
+  fileName: string;
+  size: number;
+}
+
+type SupportedJavaArchitecture = "x64" | "aarch64";
+
+interface JavaPackageArchive {
+  architecture: SupportedJavaArchitecture;
+  packagePath: string;
+  checksum: string;
+  downloadURL: string;
+  fileName: string;
+  size: number;
 }
 
 function outputLine(
@@ -119,21 +150,138 @@ function buildInstallPlan(
   };
 }
 
-async function ensureJavaAvailable(): Promise<void> {
-  let result: CommandResult;
-  try {
-    result = await runCommand("java", ["-version"]);
-  } catch {
-    throw new Error(
-      "Java is required before setting up the Android SDK. Install Java 17 or newer and try again."
+function javaArchitectureCandidates(runtime: HostRuntime): SupportedJavaArchitecture[] {
+  if (runtime.arch === "x64") return ["x64"];
+  if (runtime.arch === "arm64") {
+    return runtime.platform === "win32" ? ["aarch64", "x64"] : ["aarch64"];
+  }
+  throw new Error(
+    "Automatic Java setup is currently supported on Linux and Windows x64/arm64 only."
+  );
+}
+
+function javaPackageFormat(fileName: string): "zip" | "tar.gz" {
+  const normalized = fileName.toLowerCase();
+  if (normalized.endsWith(".zip")) return "zip";
+  if (normalized.endsWith(".tar.gz") || normalized.endsWith(".tgz")) return "tar.gz";
+  throw new Error(`Unsupported Java archive format for ${fileName}.`);
+}
+
+async function fetchLatestJavaArchive(runtime: HostRuntime): Promise<JavaPackageArchive> {
+  const architectures = javaArchitectureCandidates(runtime);
+
+  for (const architecture of architectures) {
+    const response = await fetch(
+      `${TEMURIN_API_URL}?architecture=${architecture}&heap_size=normal&image_type=jdk&jvm_impl=hotspot&os=${runtime.hostOS}&package_type=jdk&project=jdk&vendor=eclipse`,
+      {
+        headers: {
+          "User-Agent": DOWNLOAD_USER_AGENT,
+        },
+      }
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load Java runtime metadata (${response.status} ${response.statusText}).`
+      );
+    }
+
+    const payload = await response.json();
+    if (!Array.isArray(payload) || payload.length === 0) continue;
+
+    const pkg = payload[0]?.binary?.package;
+    const fileName = pkg?.name?.trim();
+    const downloadURL = pkg?.link?.trim();
+    const checksum = pkg?.checksum?.trim().toLowerCase();
+    const size = Number(pkg?.size ?? "0");
+    if (!fileName || !downloadURL || !checksum || size <= 0) continue;
+
+    return {
+      architecture,
+      packagePath: `temurin-jdk-${architecture}`,
+      checksum,
+      downloadURL,
+      fileName,
+      size,
+    };
+  }
+
+  throw new Error(
+    `Unable to locate a downloadable Java ${MINIMUM_JAVA_FEATURE_VERSION}+ runtime for ${runtime.hostOS} ${runtime.arch}.`
+  );
+}
+
+async function ensureJavaAvailable(
+  runtime: HostRuntime,
+  onOutput?: (chunk: string) => void
+): Promise<void> {
+  const existing = resolveJavaRuntime();
+  if (existing.validationStatus.kind === "available") {
+    outputLine(
+      onOutput,
+      `Java ${existing.featureVersion} detected at ${existing.displayPath}.`
+    );
+    return;
+  }
+
+  if (existing.validationStatus.kind === "unsupported") {
+    outputLine(onOutput, `${existing.validationStatus.message}`);
+  } else {
+    outputLine(
+      onOutput,
+      `Java ${MINIMUM_JAVA_FEATURE_VERSION}+ not detected. Installing a managed runtime.`
     );
   }
 
-  if (result.exitCode !== 0) {
-    throw new Error(
-      "Java is required before setting up the Android SDK. Install Java 17 or newer and try again."
+  const archive = await fetchLatestJavaArchive(runtime);
+  javaPackageFormat(archive.fileName);
+  if (runtime.platform === "win32" && runtime.arch === "arm64" && archive.architecture === "x64") {
+    outputLine(
+      onOutput,
+      "No native Windows arm64 Temurin archive was published. Falling back to the Windows x64 JDK."
     );
   }
+  outputLine(onOutput, `Using ${archive.fileName}.`);
+
+  const tempRoot = mkdtempSync(join(tmpdir(), "avdbuddy-java-"));
+  try {
+    const archivePath = join(tempRoot, archive.fileName);
+    const extractRoot = join(tempRoot, "extracted");
+    await downloadArchive(
+      {
+        packagePath: archive.packagePath,
+        checksum: archive.checksum,
+        checksumAlgorithm: "sha256",
+        downloadURL: archive.downloadURL,
+        fileName: archive.fileName,
+        size: archive.size,
+      },
+      archivePath,
+      onOutput
+    );
+    await extractArchiveContents(
+      runtime.hostOS,
+      archivePath,
+      extractRoot,
+      "Extracting Java runtime",
+      onOutput
+    );
+    const extracted = findExtractedJavaRoot(extractRoot);
+    installJavaPackage(extracted, onOutput);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+
+  const installed = resolveJavaRuntime();
+  if (installed.validationStatus.kind !== "available") {
+    throw new Error(
+      `Java installation completed, but AvdBuddy could not verify Java ${MINIMUM_JAVA_FEATURE_VERSION}+ afterwards.`
+    );
+  }
+
+  outputLine(
+    onOutput,
+    `Java ${installed.featureVersion} ready at ${installed.displayPath}.`
+  );
 }
 
 function parseRepositoryArchive(
@@ -253,6 +401,17 @@ async function fetchLatestEmulatorArchive(
   );
 }
 
+function repositoryDownloadArchive(archive: RepositoryArchive): DownloadableArchive {
+  return {
+    packagePath: archive.packagePath,
+    checksum: archive.checksum,
+    checksumAlgorithm: "sha1",
+    downloadURL: `${ANDROID_REPOSITORY_BASE_URL}/${archive.url}`,
+    fileName: basename(archive.url),
+    size: archive.size,
+  };
+}
+
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024 * 1024) {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
@@ -267,20 +426,23 @@ function formatBytes(bytes: number): string {
 }
 
 async function downloadArchive(
-  archive: RepositoryArchive,
+  archive: DownloadableArchive,
   destinationPath: string,
   onOutput?: (chunk: string) => void
 ): Promise<void> {
-  const url = `${ANDROID_REPOSITORY_BASE_URL}/${archive.url}`;
   outputLine(
     onOutput,
-    `Downloading ${basename(archive.url)} (${formatBytes(archive.size)})...`
+    `Downloading ${archive.fileName} (${formatBytes(archive.size)})...`
   );
 
-  const response = await fetch(url);
+  const response = await fetch(archive.downloadURL, {
+    headers: {
+      "User-Agent": DOWNLOAD_USER_AGENT,
+    },
+  });
   if (!response.ok) {
     throw new Error(
-      `Failed to download Android command-line tools (${response.status} ${response.statusText}).`
+      `Failed to download ${archive.packagePath} (${response.status} ${response.statusText}).`
     );
   }
   if (!response.body) {
@@ -329,13 +491,13 @@ async function downloadArchive(
     reader.releaseLock();
   }
 
-  const sha1 = createHash("sha1")
+  const digest = createHash(archive.checksumAlgorithm)
     .update(Buffer.from(await Bun.file(destinationPath).arrayBuffer()))
     .digest("hex")
     .toLowerCase();
-  if (sha1 !== archive.checksum) {
+  if (digest !== archive.checksum) {
     throw new Error(
-      `Checksum mismatch for ${archive.packagePath}. Expected ${archive.checksum}, received ${sha1}.`
+      `Checksum mismatch for ${archive.packagePath}. Expected ${archive.checksum}, received ${digest}.`
     );
   }
 
@@ -367,14 +529,16 @@ async function runStreamingCommandChecked(
   options: {
     stdin?: string;
     onOutput?: (chunk: string) => void;
+    env?: Record<string, string | undefined>;
   } = {}
 ): Promise<void> {
-  const { stdin, onOutput } = options;
+  const { stdin, onOutput, env } = options;
   outputLine(onOutput, `$ ${executable} ${args.join(" ")}`);
 
   let result: CommandResult;
   try {
     result = await runCommandStreaming(executable, args, {
+      env,
       stdin,
       onOutput,
     });
@@ -422,6 +586,21 @@ function findExtractedEmulatorRoot(extractRoot: string): string {
   );
 }
 
+function findExtractedJavaRoot(extractRoot: string): string {
+  const binaryName = process.platform === "win32" ? "java.exe" : "java";
+
+  for (const child of readdirSync(extractRoot)) {
+    const childPath = join(extractRoot, child);
+    if (existsSync(join(childPath, "bin", binaryName))) return childPath;
+  }
+
+  if (existsSync(join(extractRoot, "bin", binaryName))) return extractRoot;
+
+  throw new Error(
+    "Downloaded Java archive did not contain the expected JDK folder structure."
+  );
+}
+
 async function extractArchiveContents(
   hostOS: SupportedHostOS,
   archivePath: string,
@@ -430,31 +609,48 @@ async function extractArchiveContents(
   onOutput?: (chunk: string) => void
 ): Promise<void> {
   mkdirSync(extractRoot, { recursive: true });
+  const normalizedPath = archivePath.toLowerCase();
 
-  if (hostOS === "windows") {
-    await runStreamingCommandChecked(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        `Expand-Archive -LiteralPath '${escapePowerShellLiteral(
-          archivePath
-        )}' -DestinationPath '${escapePowerShellLiteral(extractRoot)}' -Force`,
-      ],
-      action,
-      { onOutput }
-    );
-  } else {
+  if (normalizedPath.endsWith(".zip")) {
+    if (hostOS === "windows") {
+      await runStreamingCommandChecked(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          `Expand-Archive -LiteralPath '${escapePowerShellLiteral(
+            archivePath
+          )}' -DestinationPath '${escapePowerShellLiteral(extractRoot)}' -Force`,
+        ],
+        action,
+        { onOutput }
+      );
+      return;
+    }
+
     await runStreamingCommandChecked(
       "unzip",
       ["-q", archivePath, "-d", extractRoot],
       action,
       { onOutput }
     );
+    return;
   }
+
+  if (normalizedPath.endsWith(".tar.gz") || normalizedPath.endsWith(".tgz")) {
+    await runStreamingCommandChecked(
+      "tar",
+      ["-xzf", archivePath, "-C", extractRoot],
+      action,
+      { onOutput }
+    );
+    return;
+  }
+
+  throw new Error(`Unsupported archive format for ${archivePath}.`);
 }
 
 function installCmdlineTools(
@@ -480,18 +676,31 @@ function installEmulatorPackage(
   outputLine(onOutput, `Installed emulator package into ${targetDir}.`);
 }
 
+function installJavaPackage(
+  extractedPath: string,
+  onOutput?: (chunk: string) => void
+): void {
+  const targetDir = managedJavaHome();
+  mkdirSync(managedJavaRoot(), { recursive: true });
+  rmSync(targetDir, { recursive: true, force: true });
+  cpSync(extractedPath, targetDir, { recursive: true });
+  outputLine(onOutput, `Installed Java runtime into ${targetDir}.`);
+}
+
 async function installBasePackages(
   sdkPath: string,
   runtime: HostRuntime,
   onOutput?: (chunk: string) => void
 ): Promise<string[]> {
   const toolchain = resolveToolchain(sdkPath);
+  const env = javaEnvironment(toolchain.javaHome);
   const installPlan = buildInstallPlan(runtime);
   await runStreamingCommandChecked(
     toolchain.sdkManager,
     [`--sdk_root=${sdkPath}`, "--licenses"],
     "Accepting Android SDK licenses",
     {
+      env,
       stdin: LICENSE_INPUT,
       onOutput,
     }
@@ -502,6 +711,7 @@ async function installBasePackages(
     [`--sdk_root=${sdkPath}`, "--install", ...installPlan.sdkManagerPackages],
     "Installing Android SDK packages",
     {
+      env,
       stdin: LICENSE_INPUT,
       onOutput,
     }
@@ -531,7 +741,7 @@ async function installBasePackages(
     try {
       const zipPath = join(tempRoot, basename(archive.url));
       const extractRoot = join(tempRoot, "extracted");
-      await downloadArchive(archive, zipPath, onOutput);
+      await downloadArchive(repositoryDownloadArchive(archive), zipPath, onOutput);
       await extractArchiveContents(
         runtime.hostOS,
         zipPath,
@@ -558,7 +768,7 @@ export async function autoSetupAndroidSDK(
   const sdkPath = requestedPath?.trim() || preferredSDKPath();
   outputLine(onOutput, `Preparing Android SDK in ${sdkPath}`);
 
-  await ensureJavaAvailable();
+  await ensureJavaAvailable(runtime, onOutput);
   mkdirSync(sdkPath, { recursive: true });
 
   let status = toolchainStatus(sdkPath);
@@ -574,7 +784,7 @@ export async function autoSetupAndroidSDK(
     try {
       const zipPath = join(tempRoot, basename(archive.url));
       const extractRoot = join(tempRoot, "extracted");
-      await downloadArchive(archive, zipPath, onOutput);
+      await downloadArchive(repositoryDownloadArchive(archive), zipPath, onOutput);
       await extractArchiveContents(
         hostOS,
         zipPath,
@@ -609,5 +819,6 @@ export async function autoSetupAndroidSDK(
 export const __sdkInstallerTestUtils = {
   buildInstallPlan,
   fetchLatestEmulatorArchive,
+  javaArchitectureCandidates,
   parseRepositoryArchive,
 };

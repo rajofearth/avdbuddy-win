@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The Windows/Linux AvdBuddy auto-setup flow now treats Java as a first-class dependency, shows it in Settings, and can install a managed Java runtime before bootstrapping Android SDK tools.
+
 ## [0.5.0] - 2026-03-04
 
 ### Added
