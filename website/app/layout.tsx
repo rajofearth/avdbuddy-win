@@ -15,7 +15,8 @@ const spaceMono = Space_Mono({
 
 export const metadata: Metadata = {
   title: "AvdBuddy",
-  description: "A native macOS app for managing Android Virtual Devices.",
+  description:
+    "A desktop app for managing Android Virtual Devices on Windows and Linux.",
 };
 
 export default function RootLayout({
@@ -25,7 +26,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${spaceGrotesk.variable} ${spaceMono.variable} antialiased`}>
+      <body
+        className={`${spaceGrotesk.variable} ${spaceMono.variable} antialiased`}
+      >
         {children}
         <script
           async

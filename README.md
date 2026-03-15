@@ -2,98 +2,117 @@
 
 ![AvdBuddy](./avdbuddy.jpg)
 
-AvdBuddy is a native macOS app for managing Android Virtual Devices without going through Android Studio.
+AvdBuddy is a desktop app for managing Android Virtual Devices on Windows and Linux without going through Android Studio.
 
 It focuses on the common emulator workflow:
 - browse your existing AVDs from a visual home screen
 - launch an emulator with a double click
 - create new AVDs through a guided wizard
 - duplicate, rename, and delete AVDs
-- download Android system images from Google when needed
+- download Android system images and required SDK packages when needed
 
 ## What It Does
 
-AvdBuddy reads the Android SDK and local AVD setup on your Mac, then gives you a faster UI for:
+AvdBuddy reads your Android SDK and local AVD setup, then gives you a faster UI for:
 - viewing all AVDs in one place
 - distinguishing them visually with stable per-device gradients
-- creating phones, tablets, foldables, TVs, and Wear OS emulators
+- creating phones, tablets, foldables, TVs, Wear OS, desktop, automotive, and XR emulators
 - selecting Android versions, variants, architecture, storage, RAM, SD card, and Google Play services options
+
+## Platform Support
+
+AvdBuddy is intended for:
+- Windows
+- Linux
 
 ## Requirements
 
 To build and run AvdBuddy from source, you need:
-- macOS
-- Xcode with command line tools (`xcodebuild`)
+- [Bun](https://bun.sh)
+- Java 17 or newer
 
-To use AvdBuddy with Android emulators, you also need:
+Android SDK setup is optional up front. AvdBuddy can help bootstrap the command-line tools and base emulator packages from inside the app.
+
+To use AvdBuddy with Android emulators, you ultimately need:
 - Android SDK command-line tools
 - `avdmanager`
 - `sdkmanager`
 - Android Emulator
 - `adb`
 
-It looks for the SDK in:
+AvdBuddy looks for the SDK in:
 - `ANDROID_SDK_ROOT`
 - `ANDROID_HOME`
-- `~/Library/Android/sdk`
+- on Windows: `%LOCALAPPDATA%\Android\Sdk`
+- on Linux: `~/Android/Sdk`
+- on Linux: `~/Android/sdk`
 
-It reads AVDs from:
-- `~/.android/avd`
+It reads AVDs from the standard Android user configuration location for your platform.
 
-## Installation
+## Getting Started
 
-You can install AvdBuddy in either of these ways:
+Install dependencies:
 
-### Download from GitHub Releases
-
-Download the latest macOS DMG from [GitHub Releases](https://github.com/alexstyl/avdbuddy/releases), then open `AvdBuddy.app` from `/Applications`.
-
-### Install with Homebrew
-
-Install directly from the shared tap:
-
-```bash
-brew install --cask alexstyl/tap/avdbuddy
+```/dev/null/README.md#L1-3
+bun install
 ```
 
-Or tap first, then install:
+Start the app in development mode:
 
-```bash
-brew tap alexstyl/tap
-brew install --cask avdbuddy
+```/dev/null/README.md#L1-3
+bun start
 ```
 
-Homebrew installs `AvdBuddy.app` into `/Applications`.
+For hot reload development:
+
+```/dev/null/README.md#L1-3
+bun dev
+```
 
 ## Development
 
+Run the type checker:
+
+```/dev/null/README.md#L1-3
+bun run typecheck
+```
+
 Run the test suite:
 
-```bash
-swift test
+```/dev/null/README.md#L1-3
+bun test
 ```
 
-Run the project with the provided macOS script. It builds the `AvdBuddy` scheme in `Debug` and launches the app:
+Build the desktop app:
 
-```bash
-./scripts/runMac
+```/dev/null/README.md#L1-3
+bun run build
 ```
 
-## Homebrew Packaging
+## Project Structure
 
-AvdBuddy can be distributed as a Homebrew cask from a shared tap repository. Homebrew installs `AvdBuddy.app` into `/Applications`. The app still requires Android SDK tools on the machine in order to manage emulators.
+```/dev/null/tree.txt#L1-13
+src/
+├── bun/                    # Main process (Bun backend)
+│   ├── index.ts            # App entry, RPC handlers, window creation
+│   ├── models/             # Data types, device profiles, version catalog
+│   └── services/           # SDK locator, config parser, emulator manager
+├── mainview/               # Browser UI (HTML/CSS/TypeScript)
+│   ├── index.html          # App shell with modals and views
+│   ├── index.css           # App styling
+│   └── index.ts            # Frontend logic, state management, RPC calls
+└── shared/
+    └── rpcTypes.ts         # Shared RPC type definitions
 
-To publish a Homebrew release:
-- build and notarize the macOS DMG with `./scripts/releaseMac`
-- upload the versioned artifact, for example `AvdBuddy-0.3.0.dmg`, to GitHub Releases
-- update the Homebrew cask in your shared tap repo, for example `alexstyl/homebrew-tap`, with the new `version` and `sha256`
+tests/                      # Bun test suite
+```
 
-The cask source for the tap is included in [`packaging/homebrew/avdbuddy.rb`](./packaging/homebrew/avdbuddy.rb). A short setup guide lives in [`packaging/homebrew/README.md`](./packaging/homebrew/README.md).
+## Architecture
 
-## Credits
-
-Inspired by [VirtualBuddy](https://github.com/insidegui/VirtualBuddy).
+- **Backend**: the Bun process handles Android SDK interactions, including locating tools, parsing `sdkmanager --list` output, managing AVD files, reading `config.ini`, and launching emulators.
+- **Frontend**: the native webview UI is built with HTML, CSS, and TypeScript.
+- **RPC**: typed RPC connects the Bun backend and the webview frontend, including support for streaming progress updates during SDK setup and AVD creation.
 
 ## License
 
-[MIT](./LICENSE) • Alex Styl ([alexstyl](https://x.com/alexstyl))
+[MIT](./LICENSE)

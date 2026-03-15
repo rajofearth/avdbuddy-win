@@ -6,11 +6,21 @@ on:
     branches:
       - main
     paths:
-      - "avdbuddy-windows/**"
+      - "src/**"
+      - "tests/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.json"
+      - "electrobun.config.ts"
       - ".github/workflows/build-desktop-executables.yml"
   pull_request:
     paths:
-      - "avdbuddy-windows/**"
+      - "src/**"
+      - "tests/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.json"
+      - "electrobun.config.ts"
       - ".github/workflows/build-desktop-executables.yml"
 
 permissions:
@@ -24,9 +34,6 @@ jobs:
   verify:
     name: Verify Bun tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: avdbuddy-windows
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -55,10 +62,7 @@ jobs:
           - label: Windows x64
             runner: windows-latest
             artifact_prefix: stable-win-x64
-            artifact_name: avdbuddy-windows-x64
-    defaults:
-      run:
-        working-directory: avdbuddy-windows
+            artifact_name: avdbuddy-win-x64
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -76,6 +80,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: avdbuddy-windows/artifacts/${{ matrix.artifact_prefix }}-*
+          path: artifacts/${{ matrix.artifact_prefix }}-*
           if-no-files-found: error
           retention-days: 14

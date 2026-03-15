@@ -14,15 +14,15 @@ const workflow = [
 
 export default function Home() {
   const [stars, setStars] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
-  const brewCommand = "brew install --cask alexstyl/tap/avdbuddy";
 
   useEffect(() => {
     let active = true;
 
     const loadStars = async () => {
       try {
-        const response = await fetch("/api/github-stars", { cache: "no-store" });
+        const response = await fetch("/api/github-stars", {
+          cache: "no-store",
+        });
         if (!response.ok) {
           return;
         }
@@ -56,16 +56,6 @@ export default function Home() {
     return `GitHub ★ ${formatted}`;
   }, [stars]);
 
-  const copyBrewCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(brewCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
     <main className="relative min-h-screen">
       <header className="sticky top-4 z-50 px-4">
@@ -75,7 +65,12 @@ export default function Home() {
           </a>
 
           <nav className="hidden items-center gap-5 text-sm text-[var(--ink-muted)] md:flex">
-            <a href="https://github.com/alexstyl/avdbuddy" target="_blank" rel="noreferrer" className="hover:text-white">
+            <a
+              href="https://github.com/alexstyl/avdbuddy"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-white"
+            >
               {githubLabel}
             </a>
           </nav>
@@ -109,23 +104,27 @@ export default function Home() {
 
           <div className="relative grid gap-8 md:grid-cols-[1fr_0.95fr] md:items-center">
             <div>
-              <p className="font-mono text-xs uppercase tracking-[0.22em] text-[#7fd5ff]">for android developers</p>
+              <p className="font-mono text-xs uppercase tracking-[0.22em] text-[#7fd5ff]">
+                for android developers
+              </p>
               <h1 className="mt-4 text-4xl font-bold leading-tight md:text-6xl">
                 Manage AVDs from
-                <br />
-                a proper desktop app.
+                <br />a proper desktop app.
               </h1>
               <p className="mt-5 max-w-xl text-lg text-[var(--ink-muted)]">
-                AvdBuddy is a native macOS tool for emulator-heavy workflows.
-                Build, launch, duplicate, and clean up virtual devices with less friction.
+                AvdBuddy is a desktop app for Windows and Linux built for
+                emulator-heavy workflows. Build, launch, duplicate, and clean up
+                virtual devices with less friction.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <a href="/api/latest-download">
-                  <Button size="lg">Download for Mac</Button>
+                  <Button size="lg">View latest release</Button>
                 </a>
-                <a href="#brew">
-                  <Button size="lg" variant="secondary">Install with Homebrew</Button>
+                <a href="#platforms">
+                  <Button size="lg" variant="secondary">
+                    Windows + Linux support
+                  </Button>
                 </a>
               </div>
             </div>
@@ -166,9 +165,12 @@ export default function Home() {
         <section className="mt-8 rounded-3xl border border-white/10 bg-[var(--surface)]/90 p-7 md:p-10">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-bold md:text-3xl">Watch AvdBuddy in action</h2>
+              <h2 className="text-2xl font-bold md:text-3xl">
+                Watch AvdBuddy in action
+              </h2>
               <p className="mt-2 text-[var(--ink-muted)]">
-                Watch how simple you can create emulators for any form factor using AvdBuddy
+                Watch how simple you can create emulators for any form factor
+                using AvdBuddy
               </p>
             </div>
             <p className="rounded-full border border-white/15 px-3 py-1 font-mono text-xs text-[var(--ink-muted)]">
@@ -194,28 +196,49 @@ export default function Home() {
         </section>
 
         <section
-          id="brew"
+          id="platforms"
           className="mt-8 rounded-3xl border border-white/10 bg-[var(--surface)]/90 p-7 md:p-10"
         >
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-bold md:text-3xl">Install via Homebrew</h2>
-              <p className="mt-2 text-[var(--ink-muted)]">
-                Best for developers who want updates through CLI tooling.
+              <h2 className="text-2xl font-bold md:text-3xl">
+                Built for Windows and Linux
+              </h2>
+              <p className="mt-2 max-w-2xl text-[var(--ink-muted)]">
+                AvdBuddy is now focused on desktop Android emulator workflows
+                for Windows and Linux. Grab the latest release from GitHub and
+                choose the package that matches your platform.
               </p>
             </div>
-            <button
-              onClick={() => {
-                void copyBrewCommand();
-              }}
+            <a
+              href="https://github.com/alexstyl/avdbuddy/releases/latest"
+              target="_blank"
+              rel="noreferrer"
               className="inline-flex h-10 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition hover:bg-white/10"
             >
-              {copied ? "Copied" : "Copy"}
-            </button>
+              Open releases
+            </a>
           </div>
-          <pre className="mt-4 overflow-auto rounded-xl border border-white/15 bg-black/70 p-4 font-mono text-sm text-[#d3d7ff]">
-            <code>{brewCommand}</code>
-          </pre>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+              <p className="font-mono text-xs uppercase tracking-[0.22em] text-[#7fd5ff]">
+                Windows
+              </p>
+              <p className="mt-2 text-sm text-[var(--ink-muted)]">
+                Use the latest Windows release artifact for a native desktop
+                experience focused on emulator management.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+              <p className="font-mono text-xs uppercase tracking-[0.22em] text-[#7fd5ff]">
+                Linux
+              </p>
+              <p className="mt-2 text-sm text-[var(--ink-muted)]">
+                Use the latest Linux release artifact to manage Android Virtual
+                Devices without opening Android Studio.
+              </p>
+            </div>
+          </div>
         </section>
       </div>
     </main>

@@ -4,13 +4,8 @@ const owner = "alexstyl";
 const repo = "avdbuddy";
 const fallbackReleaseUrl = `https://github.com/${owner}/${repo}/releases/latest`;
 
-type GithubAsset = {
-  name: string;
-  browser_download_url: string;
-};
-
 type GithubRelease = {
-  assets: GithubAsset[];
+  html_url?: string;
 };
 
 export async function GET() {
@@ -23,7 +18,7 @@ export async function GET() {
           "User-Agent": "avdbuddy-website",
         },
         next: { revalidate: 300 },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -31,15 +26,7 @@ export async function GET() {
     }
 
     const release = (await response.json()) as GithubRelease;
-    const dmgAsset = release.assets.find((asset) =>
-      asset.name.toLowerCase().endsWith(".dmg")
-    );
-
-    if (!dmgAsset) {
-      return NextResponse.redirect(fallbackReleaseUrl);
-    }
-
-    return NextResponse.redirect(dmgAsset.browser_download_url);
+    return NextResponse.redirect(release.html_url || fallbackReleaseUrl);
   } catch {
     return NextResponse.redirect(fallbackReleaseUrl);
   }

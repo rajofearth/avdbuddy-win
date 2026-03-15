@@ -3,10 +3,9 @@ import type { ElectrobunConfig } from "electrobun";
 export default {
   app: {
     name: "AvdBuddy",
-    identifier: "com.avdbuddy.windows",
+    identifier: "com.avdbuddy",
     version: "0.1.0",
-    description:
-      "Manage Android Virtual Devices without Android Studio",
+    description: "Manage Android Virtual Devices without Android Studio",
   },
   build: {
     bun: {
